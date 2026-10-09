@@ -58,6 +58,26 @@ def test_silent_recording_survives_a_second_cli_process(tmp_path: Path) -> None:
     ).stdout
     assert pixels[0] > 240 and pixels[1] < 15 and pixels[2] < 15
     assert source.read_bytes() == original
+    interval = subprocess.run(
+        [
+            str(cli),
+            "inspect",
+            recording["recording_id"],
+            "--start",
+            "1.1",
+            "--end",
+            "1.4",
+            "--source-frames",
+            "--crop",
+            "10,10,20,20",
+            "--store",
+            str(tmp_path / "store"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert interval.returncode == 0, interval.stderr
+    assert [f["actual_time"] for f in json.loads(interval.stdout)["frames"]] == [1.1, 1.2, 1.3]
 
 
 @pytest.mark.parametrize("at", ["-1", "nan", "inf", "-inf", "garbage"])

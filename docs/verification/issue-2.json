@@ -1,0 +1,14 @@
+{
+  "issue": 2,
+  "first_red": "Public inspect(start=1.1, end=1.4, source_frames=True) raised TypeError: unexpected keyword argument start.",
+  "green": "Four-second 10 fps fixture: overview omits red frame at 1.2 s; dense inspection returns blue 1.1, red 1.2, blue 1.3.",
+  "timing_fixtures": ["Nonzero source start normalized to recording zero", "Gap [1.0, 1.3) has no frame", "First frame after 1.05 is 1.3", "Long interval covers its tail within 24 samples", "Dense requests above 120 frames fail explicitly"],
+  "display_fixture": "80x40 source with SAR 2:1 and 90-degree rotation displays as 40x160; a 20x30 crop retrieves the independently placed red marker.",
+  "real_recordings": [
+    {"kind": "user-provided silent reference", "duration_seconds": 178.655, "dimensions": [1024, 1418], "prepare_seconds": 9.62},
+    {"kind": "user-provided narrated reference", "duration_seconds": 259.8667708333333, "dimensions": [1024, 1418], "prepare_seconds": 16.35}
+  ],
+  "real_media_regression": "Dense extraction initially produced non-monotonic PNG muxer timestamps on the narrated recording. Preserving the source encoder time base fixes this without suppressing decoder diagnostics.",
+  "privacy": "Original recordings and all derived images remain local in ignored work directories.",
+  "limitations": "Sparse overview is not event coverage. These tests prove retrieval, not cursor intent or narration understanding. Speech recognition is still pending."
+}

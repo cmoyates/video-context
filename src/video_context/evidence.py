@@ -8,10 +8,12 @@ import subprocess
 from dataclasses import asdict, dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Literal
+from typing import Literal, overload
 from uuid import uuid4
 
 from PIL import Image, ImageDraw
+
+type Crop = tuple[int, int, int, int]
 
 
 @dataclass(frozen=True)
@@ -51,15 +53,38 @@ class Overview:
 
 
 @dataclass(frozen=True)
+class Inspection:
+    start: float
+    end: float
+    frames: list[Frame]
+    source_frames: bool
+    sampling_interval: float | None
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
 class _Video:
     width: int
     height: int
     duration: Fraction
     time_base: Fraction
     pts: tuple[int, ...]
+    origin: Fraction
 
 
-def _extract(source: str, index: int, path: Path) -> None:
+def _extract(
+    source: str, indices: list[int], directory: Path, video: _Video, crop: Crop | None = None
+) -> dict[int, Path]:
+    indices = sorted(set(indices))
+    if not indices:
+        return {}
+    prefix = uuid4().hex
+    selection = "+".join(f"eq(n\\,{index})" for index in indices)
+    filters = f"select={selection},scale={video.width}:{video.height},setsar=1"
+    if crop is not None:
+        x, y, width, height = crop
+        filters += f",format=rgb24,crop={width}:{height}:{x}:{y}:exact=1"
     _run(
         [
             "ffmpeg",
@@ -72,14 +97,22 @@ def _extract(source: str, index: int, path: Path) -> None:
             "-map",
             "0:v:0",
             "-vf",
-            f"select=eq(n\\,{index})",
+            filters,
             "-frames:v",
-            "1",
+            str(len(indices)),
             "-fps_mode",
             "passthrough",
-            str(path),
+            "-enc_time_base",
+            "-1",
+            str(directory / f"{prefix}-%03d.png"),
         ]
     )
+    paths = {
+        index: directory / f"{prefix}-{slot:03d}.png" for slot, index in enumerate(indices, start=1)
+    }
+    if not all(path.is_file() for path in paths.values()):
+        raise ValueError("Decoder did not produce every requested frame")
+    return paths
 
 
 def _run(command: list[str]) -> str:
@@ -133,19 +166,14 @@ def _parse_video(data: dict[str, object]) -> _Video:
         raise ValueError("No video frames found")
     pts = tuple(_integer(frame["pts"]) for frame in frames)
     time_base = Fraction(_text(stream["time_base"]))
-    rate = Fraction(_text(stream["r_frame_rate"]))
-    if time_base <= 0 or rate <= 0:
-        raise ValueError("Unsupported video time base or frame rate")
-    step = 1 / rate / time_base
-    if pts[0] != 0 or stream.get("start_pts") != 0:
-        raise ValueError("Unsupported timing: video must start at zero")
-    if any(b - a != step for a, b in zip(pts, pts[1:], strict=False)):
-        raise ValueError("Unsupported timing: expected continuous constant-frame-rate video")
-    if any(_integer(frame["duration"]) != step for frame in frames):
-        raise ValueError("Unsupported timing: variable frame duration")
-    duration_ticks = _integer(stream["duration_ts"])
-    if duration_ticks != pts[-1] + step:
-        raise ValueError("Unsupported timing: stream duration disagrees with decoded frames")
+    origin = Fraction(_text(data.get("timeline_origin", "0")))
+    duration = Fraction(_text(data.get("timeline_duration", stream["duration"])))
+    if time_base <= 0 or duration <= 0:
+        raise ValueError("Unsupported video time base or duration")
+    if any(b <= a for a, b in zip(pts, pts[1:], strict=False)):
+        raise ValueError("Unsupported timing: frame presentation times must increase")
+    if pts[0] * time_base < origin or pts[-1] * time_base - origin >= duration:
+        raise ValueError("Unsupported timing: frames outside recording timeline")
     if "nb_frames" in stream and int(_text(stream["nb_frames"])) != len(frames):
         raise ValueError("Incomplete video: decoded frame count disagrees with stream")
     width, height = _integer(stream["width"]), _integer(stream["height"])
@@ -155,10 +183,13 @@ def _parse_video(data: dict[str, object]) -> _Video:
         or any(frame.get("width") != width or frame.get("height") != height for frame in frames)
     ):
         raise ValueError("Unsupported display: invalid or changing dimensions")
-    if stream.get("sample_aspect_ratio", "1:1") not in ("1:1", "N/A"):
-        raise ValueError("Unsupported display: non-square pixels")
-    if any(frame.get("sample_aspect_ratio", "1:1") not in ("1:1", "N/A") for frame in frames):
+    sar = stream.get("sample_aspect_ratio", "1:1")
+    if any(frame.get("sample_aspect_ratio", sar) != sar for frame in frames):
         raise ValueError("Unsupported display: changing pixel aspect ratio")
+    ratio = Fraction(1) if sar == "N/A" else Fraction(_text(sar).replace(":", "/"))
+    if ratio <= 0:
+        raise ValueError("Unsupported display: invalid pixel aspect ratio")
+    width = round(width * ratio)
     if any(
         item.get("color_transfer") in ("smpte2084", "arib-std-b67") for item in (stream, *frames)
     ):
@@ -167,19 +198,30 @@ def _parse_video(data: dict[str, object]) -> _Video:
         raise ValueError("Unsupported display: interlaced video")
     if any(frame.get("interlaced_frame") != 0 for frame in frames):
         raise ValueError("Unsupported display: interlaced or unknown frame structure")
+    matrices = [
+        side
+        for side in _objects(stream.get("side_data_list", []))
+        if side.get("side_data_type") == "Display Matrix"
+    ]
     if any(
         side.get("side_data_type") == "Display Matrix"
-        for item in (stream, *frames)
-        for side in _objects(item.get("side_data_list", []))
+        for frame in frames
+        for side in _objects(frame.get("side_data_list", []))
     ):
-        raise ValueError("Unsupported display: rotation or display matrix")
+        raise ValueError("Unsupported display: changing display matrix")
+    if matrices:
+        rotation = _integer(matrices[0]["rotation"])
+        if len(matrices) != 1 or rotation % 90:
+            raise ValueError("Unsupported display: only quarter-turn rotations are supported")
+        if rotation % 180:
+            width, height = height, width
     if any(
         frame.get(f"crop_{edge}", 0) != 0
         for frame in frames
         for edge in ("top", "bottom", "left", "right")
     ):
         raise ValueError("Unsupported display: frame cropping metadata")
-    return _Video(width, height, duration_ticks * time_base, time_base, pts)
+    return _Video(width, height, duration, time_base, pts, origin)
 
 
 class RecordingEvidence:
@@ -202,6 +244,7 @@ class RecordingEvidence:
                         "-v",
                         "error",
                         "-show_streams",
+                        "-show_format",
                         "-of",
                         "json",
                         str(source),
@@ -235,6 +278,21 @@ class RecordingEvidence:
         )
         data["source"] = str(source)
         try:
+            timings = [
+                (
+                    _integer(s["start_pts"]) * Fraction(_text(s["time_base"])),
+                    _integer(s["duration_ts"]) * Fraction(_text(s["time_base"])),
+                )
+                for s in streams
+                if s.get("codec_type") in ("audio", "video")
+            ]
+            origin = min(start for start, _ in timings)
+            end = max(start + duration for start, duration in timings)
+        except (KeyError, ZeroDivisionError) as exc:
+            raise ValueError("Unsupported media: stream timeline is incomplete") from exc
+        data["timeline_origin"] = str(origin)
+        data["timeline_duration"] = str(end - origin)
+        try:
             video = _parse_video(data)
         except (KeyError, ZeroDivisionError) as exc:
             raise ValueError(f"Unsupported or incomplete video metadata: {exc}") from exc
@@ -245,10 +303,10 @@ class RecordingEvidence:
         sheet = Image.new("RGB", (960, 40 + ((count + 3) // 4) * cell_height), "#181818")
         draw = ImageDraw.Draw(sheet)
         draw.text((12, 12), "SPARSE OVERVIEW - may omit events", fill="white")
+        paths = _extract(str(source), indices, directory, video)
         for slot, index in enumerate(indices):
-            path = directory / f"overview-{slot}.png"
-            _extract(str(source), index, path)
-            actual = float(video.pts[index] * video.time_base)
+            path = paths[index]
+            actual = float(video.pts[index] * video.time_base - video.origin)
             overview_frames.append(Frame(actual, actual, str(path)))
             x, y = (slot % 4) * 240, 40 + (slot // 4) * cell_height
             with Image.open(path) as frame_image:
@@ -278,9 +336,7 @@ class RecordingEvidence:
         temporary.replace(manifest)
         return result
 
-    def inspect(self, recording_id: str, at: float) -> Frame | NoFrame:
-        if not math.isfinite(at) or at < 0:
-            raise ValueError("Requested time must be finite and nonnegative (seconds)")
+    def _load(self, recording_id: str) -> tuple[dict[str, object], _Video]:
         if not re.fullmatch(r"[0-9a-f]{64}", recording_id):
             raise ValueError("Invalid recording reference: expected a SHA-256 identifier")
         directory = self.store / recording_id
@@ -298,20 +354,101 @@ class RecordingEvidence:
         source = Path(_text(data["source"]))
         if _digest(source) != recording_id:
             raise ValueError("Source changed since preparation; prepare it again")
+        return data, video
+
+    @overload
+    def inspect(
+        self, recording_id: str, at: float, *, crop: Crop | None = None
+    ) -> Frame | NoFrame: ...
+
+    @overload
+    def inspect(
+        self,
+        recording_id: str,
+        *,
+        start: float,
+        end: float,
+        source_frames: bool = False,
+        crop: Crop | None = None,
+    ) -> Inspection: ...
+
+    def inspect(
+        self,
+        recording_id: str,
+        at: float | None = None,
+        *,
+        start: float | None = None,
+        end: float | None = None,
+        source_frames: bool = False,
+        crop: Crop | None = None,
+    ) -> Frame | NoFrame | Inspection:
+        if at is not None and (not math.isfinite(at) or at < 0):
+            raise ValueError("Requested time must be finite and nonnegative (seconds)")
+        data, video = self._load(recording_id)
+        if crop is not None:
+            x, y, width, height = crop
+            if (
+                any(type(v) is not int for v in crop)
+                or x < 0
+                or y < 0
+                or width <= 0
+                or height <= 0
+                or x + width > video.width
+                or y + height > video.height
+            ):
+                raise ValueError("Invalid crop: use x,y,width,height within displayed dimensions")
+        directory = self.store / recording_id
+        source = Path(_text(data["source"]))
+        if at is None:
+            if start is None or end is None or not all(math.isfinite(t) for t in (start, end)):
+                raise ValueError("Interval requires finite start and end")
+            if start < 0 or end <= start or Fraction(str(end)) > video.duration:
+                raise ValueError("Interval must satisfy 0 <= start < end <= duration")
+            first, stop = Fraction(str(start)), Fraction(str(end))
+            available = [
+                (i, p * video.time_base - video.origin)
+                for i, p in enumerate(video.pts)
+                if first <= p * video.time_base - video.origin < stop
+            ]
+            sampling = None
+            if source_frames:
+                if len(available) > 120:
+                    raise ValueError("More than 120 source frames; request a narrower interval")
+                selected_frames = [(i, t, t) for i, t in available]
+            else:
+                step = max(Fraction(1, 2), (stop - first) / 24)
+                sampling = float(step)
+                selected_frames = []
+                requested = first
+                while requested < stop:
+                    match = next(((i, t) for i, t in available if t >= requested), None)
+                    if match is not None:
+                        selected_frames.append((match[0], requested, match[1]))
+                    requested += step
+            paths = _extract(
+                str(source), [i for i, _, _ in selected_frames], directory, video, crop
+            )
+            frames = []
+            for index, requested, actual in selected_frames:
+                frames.append(Frame(float(requested), float(actual), str(paths[index])))
+            if _digest(source) != recording_id:
+                raise ValueError("Source changed during inspection; prepare it again")
+            return Inspection(
+                start, end, frames, source_frames, sampling, video.width, video.height
+            )
         requested_time = Fraction(str(at))
         selected = next(
             (
                 (index, pts)
                 for index, pts in enumerate(video.pts)
-                if pts * video.time_base >= requested_time
+                if pts * video.time_base - video.origin >= requested_time
             ),
             None,
         )
         if selected is None:
             return NoFrame(at)
         index, pts = selected
-        path = directory / f"{uuid4().hex}.png"
-        _extract(_text(data["source"]), index, path)
+        path = _extract(str(source), [index], directory, video, crop)[index]
         if _digest(source) != recording_id:
             raise ValueError("Source changed during inspection; prepare it again")
-        return Frame(at, float(pts * video.time_base), str(path))
+        return Frame(at, float(pts * video.time_base - video.origin), str(path))

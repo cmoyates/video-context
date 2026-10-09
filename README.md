@@ -8,9 +8,9 @@ and visual evidence that the agent can inspect alongside a codebase.
 
 ## Status
 
-The first slice prepares local MOV/MP4 recordings, creates a sparse overview,
-and retrieves a timestamped frame in a later CLI process. Transcription, interval
-inspection, crops, and the Codex skill remain planned. No speech model is needed
+The visual slices prepare local MOV/MP4 recordings, create a sparse overview,
+and retrieve timestamped frames, intervals, and crops in later CLI processes.
+Transcription and the Codex skill remain planned. No speech model is needed
 or downloaded for visual preparation.
 
 ## Prepare and inspect
@@ -22,6 +22,8 @@ uv sync --locked
 uv run video-context prepare /absolute/path/recording.mov --store ./work/evidence
 # Use recording_id from the JSON above, with the same store:
 uv run video-context inspect RECORDING_ID --at 1.15 --store ./work/evidence
+uv run video-context inspect RECORDING_ID --start 1.1 --end 1.4 --source-frames --store ./work/evidence
+uv run video-context inspect RECORDING_ID --at 1.2 --crop 10,10,120,60 --store ./work/evidence
 ```
 
 Both commands write JSON to stdout; failures write diagnostics to stderr and exit
@@ -37,11 +39,18 @@ The overview labels up to 12 samples spanning first to last frame; it can omit
 events. `audio_status: "no_audio"` keeps silent recordings usable; audio-bearing
 files report `not_processed` and retain visual evidence.
 
-Supported now: one progressive, unrotated video stream with square pixels,
-continuous constant frame intervals and a zero-origin timeline. Offset/variable
-timelines, frame gaps, display matrices, changing dimensions, interlacing,
-non-square pixels, and HDR transfer functions are rejected. Unsupported timing
-and display handling belongs to [issue #2](https://github.com/cmoyates/video-context/issues/2).
+Intervals are half-open `[start, end)`. Sampling defaults to every 0.5 seconds,
+spreading a maximum of 24 requests across longer intervals. `sampling_interval`
+reports the effective spacing. `--source-frames` returns every decoded frame in
+the interval, or asks for a narrower interval above 120 frames. Gaps never create
+invented frames. `--crop x,y,width,height` uses upright, square-pixel display
+coordinates; out-of-bounds crops fail clearly.
+
+Supported now: one progressive video stream, variable frame intervals, nonzero
+source starts, frame gaps, quarter-turn rotation, and non-square pixels. Times
+use the earliest audio/video stream start as the recording playback origin.
+Changing dimensions, changing display metadata, interlacing, arbitrary rotation,
+and HDR transfer functions remain unsupported.
 
 The original file stays untouched at its existing path and must remain available.
 Its content hash is checked before and after processing. A schema-versioned

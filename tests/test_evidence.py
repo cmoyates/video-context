@@ -104,17 +104,19 @@ def test_end_of_recording_has_no_frame_at_or_after(silent_clip: Path, tmp_path: 
 
 
 @pytest.mark.parametrize(
-    "filter_graph",
+    "filter_graph, dimensions, duration",
     [
-        "setpts=PTS+1/TB",
-        "setpts=PTS+gte(N\\,10)*0.3/TB",
-        "setsar=2/1",
+        ("setpts=PTS+1/TB", (160, 90), 2.0),
+        ("setpts=PTS+gte(N\\,10)*0.3/TB", (160, 90), 2.3),
+        ("setsar=2/1", (320, 90), 2.0),
     ],
 )
-def test_unsupported_media_is_not_published(
+def test_offset_variable_timing_and_pixel_aspect_are_supported(
     silent_clip: Path,
     tmp_path: Path,
     filter_graph: str,
+    dimensions: tuple[int, int],
+    duration: float,
 ) -> None:
     unsupported = tmp_path / "unsupported.mov"
     subprocess.run(
@@ -135,14 +137,13 @@ def test_unsupported_media_is_not_published(
         check=True,
     )
     evidence = RecordingEvidence(tmp_path / "store")
-    with pytest.raises(ValueError, match="Unsupported"):
-        evidence.prepare(unsupported)
-    recording_id = hashlib.sha256(unsupported.read_bytes()).hexdigest()
-    with pytest.raises(ValueError, match="not prepared"):
-        evidence.inspect(recording_id, 0)
+    recording = evidence.prepare(unsupported)
+    assert (recording.width, recording.height) == dimensions
+    assert recording.duration == duration
+    assert evidence.inspect(recording.recording_id, 0).actual_time == 0
 
 
-def test_rotated_video_is_rejected(silent_clip: Path, tmp_path: Path) -> None:
+def test_rotated_video_reports_upright_dimensions(silent_clip: Path, tmp_path: Path) -> None:
     rotated = tmp_path / "rotated.mov"
     subprocess.run(
         [
@@ -159,8 +160,8 @@ def test_rotated_video_is_rejected(silent_clip: Path, tmp_path: Path) -> None:
         ],
         check=True,
     )
-    with pytest.raises(ValueError, match="Unsupported display"):
-        RecordingEvidence(tmp_path / "store").prepare(rotated)
+    recording = RecordingEvidence(tmp_path / "store").prepare(rotated)
+    assert (recording.width, recording.height) == (90, 160)
 
 
 def test_audio_presence_is_not_mislabeled_as_silence(silent_clip: Path, tmp_path: Path) -> None:
