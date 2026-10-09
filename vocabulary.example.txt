@@ -1,6 +1,7 @@
-# Planned vocabulary format: UTF-8, one preferred term per line.
+# Vocabulary format: UTF-8, one preferred term per line.
 # Copy this file to vocabulary.local.txt and replace these examples.
-# Blank lines and lines beginning with # are reserved for readability.
-# Placeholder only: the CLI does not read vocabulary files yet.
+# Blank lines and lines beginning with # are ignored.
+# Pass the customized file explicitly with prepare --vocabulary PATH.
+# Keep hints focused: the model token budget also includes separators.
 Example Product
 Example UI Library

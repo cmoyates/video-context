@@ -7,6 +7,36 @@ from pathlib import Path
 import pytest
 
 
+def test_missing_vocabulary_fails_before_preparing_the_source(tmp_path: Path) -> None:
+    cli = Path(sys.executable).parent / "video-context"
+    missing = tmp_path / "missing-vocabulary.txt"
+    result = subprocess.run(
+        [str(cli), "prepare", "not-opened.mov", "--vocabulary", str(missing)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "missing-vocabulary.txt" in result.stderr
+    assert "No such file" in result.stderr
+    assert not result.stdout
+
+
+@pytest.mark.parametrize("contents", [b"\xff", b"Example\x00Product"])
+def test_invalid_vocabulary_is_a_clear_cli_failure(tmp_path: Path, contents: bytes) -> None:
+    vocabulary = tmp_path / "invalid.txt"
+    vocabulary.write_bytes(contents)
+    cli = Path(sys.executable).parent / "video-context"
+    result = subprocess.run(
+        [str(cli), "prepare", "not-opened.mov", "--vocabulary", str(vocabulary)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert result.stderr.startswith("video-context:")
+    assert "not-opened.mov" not in result.stderr
+    assert not result.stdout
+
+
 def test_silent_recording_survives_a_second_cli_process(tmp_path: Path) -> None:
     source = tmp_path / "silent.mov"
     subprocess.run(

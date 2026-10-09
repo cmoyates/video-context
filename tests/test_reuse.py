@@ -71,6 +71,35 @@ def test_prepared_evidence_is_reused_when_recognizer_is_unavailable(
     assert evidence.inspect(reused.recording_id, at=0.5).actual_time == 0.5
 
 
+def test_vocabulary_is_preserved_and_identical_hints_reuse_speech(
+    source: Path, tmp_path: Path
+) -> None:
+    configuration = replace(
+        ReferenceSpeech.configuration,
+        vocabulary=("Font Awesome", "Example UI"),
+        carry_initial_prompt=True,
+    )
+
+    class HintedSpeech(ReferenceSpeech):
+        def __init__(self) -> None:
+            self.configuration = configuration
+
+    class UnavailableHintedSpeech(HintedSpeech):
+        def transcribe(self, audio: Path) -> object:
+            raise RuntimeError("external recognizer unavailable")
+
+    initial = RecordingEvidence(tmp_path / "store", transcriber=HintedSpeech()).prepare(source)
+    evidence = RecordingEvidence(tmp_path / "store", transcriber=UnavailableHintedSpeech())
+    reused = evidence.prepare(source)
+    assert reused.cache_status == "reused"
+    assert reused.generation == initial.generation
+    assert reused.transcript is not None
+    assert reused.transcript.configuration.vocabulary == ("Font Awesome", "Example UI")
+    assert evidence.search(reused.recording_id, "not hide").matches[0].text == (
+        "Do not hide this button."
+    )
+
+
 def test_identical_moved_source_is_reassociated_without_recognition(
     source: Path, tmp_path: Path
 ) -> None:
@@ -324,6 +353,8 @@ def test_default_stream_does_not_reuse_a_different_explicit_stream(
         replace(ReferenceSpeech.configuration, condition_on_previous_text=True),
         replace(ReferenceSpeech.configuration, normalization_version=2),
         replace(ReferenceSpeech.configuration, runtime_version="new-runtime"),
+        replace(ReferenceSpeech.configuration, vocabulary=("Example Product",)),
+        replace(ReferenceSpeech.configuration, carry_initial_prompt=True),
     ],
 )
 def test_changed_recognition_configuration_cannot_reuse_old_transcript(

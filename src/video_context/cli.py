@@ -5,7 +5,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .evidence import Crop, PreparationFailed, RecordingEvidence
-from .transcription import MODELS, MLXWhisper, model_path
+from .transcription import MODELS, MLXWhisper, load_vocabulary, model_path
 
 
 class _Arguments(argparse.Namespace):
@@ -28,6 +28,7 @@ class _Arguments(argparse.Namespace):
     audio_stream: int | None
     overview_frames: int
     rebuild: bool
+    vocabulary: Path | None
 
 
 def _crop(value: str) -> Crop:
@@ -51,6 +52,11 @@ def main() -> None:
     )
     prepare.add_argument("--model", choices=MODELS, default="turbo")
     prepare.add_argument("--language", help="Language code; omitted means auto-detection")
+    prepare.add_argument(
+        "--vocabulary",
+        type=Path,
+        help="UTF-8 preferred terms, one per line; hints for every speech window",
+    )
     prepare.add_argument(
         "--overview-frames", type=int, default=12, help="Sparse overview budget (1–12)"
     )
@@ -92,7 +98,12 @@ def main() -> None:
         evidence = RecordingEvidence(args.store)
         if args.command == "prepare":
             evidence = RecordingEvidence(
-                args.store, transcriber=MLXWhisper(args.model, language=args.language)
+                args.store,
+                transcriber=MLXWhisper(
+                    args.model,
+                    language=args.language,
+                    vocabulary=load_vocabulary(args.vocabulary) if args.vocabulary else (),
+                ),
             )
             result = evidence.prepare(
                 args.source,

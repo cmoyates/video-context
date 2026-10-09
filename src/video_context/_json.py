@@ -21,6 +21,12 @@ def text(value: object) -> str:
     return value
 
 
+def strings(value: object) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("Expected a JSON array of strings")
+    return [text(item) for item in value]
+
+
 def integer(value: object) -> int:
     if type(value) is not int:
         raise ValueError("Expected an integer")

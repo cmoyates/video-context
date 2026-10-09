@@ -13,7 +13,7 @@ video-context = "video_context.cli:main"
 
 [project.optional-dependencies]
 asr = [
-    "mlx-whisper==0.4.3",
+    "mlx-whisper @ git+https://github.com/cmoyates/mlx-examples.git@24c78c9c3bcdab8d162ec6b56d73643f2f632a79#subdirectory=whisper",
 ]
 
 [build-system]

@@ -1,0 +1,45 @@
+{
+  "issue": 9,
+  "status": "implementation_and_local_acceptance_complete",
+  "backend": {
+    "repository": "https://github.com/cmoyates/mlx-examples",
+    "base": "c1af8c46bd4c4704cff1561736a634cee38efc6c",
+    "commit": "24c78c9c3bcdab8d162ec6b56d73643f2f632a79",
+    "version": "0.4.3+vc.1",
+    "prompt_limit_tokens": 223,
+    "return_upstream": "Documented in whisper/VIDEO_CONTEXT_FORK.md; rerun backend and application acceptance before replacing the pinned fork."
+  },
+  "validation": {
+    "suite": "73 passed, 3 opt-in tests skipped in 13.33 seconds",
+    "quality": "Ruff check, Ruff format, ty and skill validation passed",
+    "backend_real_model": "4 passed in 7.46 seconds: late hinted speech, prompt overflow, exact limit with previous-text conditioning, default opt-out equivalence",
+    "application_real_model": "Small vocabulary acceptance passed; both turbo acceptance tests passed in 16.69 seconds",
+    "synthetic_disclosure": "Real-model fixtures use macOS Samantha speech, a static colored video, and a hinted name after 36 seconds. These verify integration, not natural-speech accuracy.",
+    "installed": "Reinstalled ASR tool from the locked dependency set. prepare/search/inspect passed from another checkout; silent fixture passed from a temporary cwd.",
+    "visual_only": "Isolated install contains only video-context and Pillow; installed silent fixture passed without MLX.",
+    "legacy": "Installed CLI searched an existing upstream-0.4.3 transcript with no vocabulary fields and preserved its generation.",
+    "empty": "Empty/comment-only effective vocabulary has exactly the same transcription configuration as no hints.",
+    "oversized_cli": "225-token vocabulary rejected with the explicit 223-token limit; visual evidence returned, failed attempt unpublished, previously published transcript still searchable.",
+    "cache": "Same effective terms reuse the generation; comment changes do not invalidate it; changed terms refresh speech. Vocabulary and backend version persist in provenance.",
+    "first_red": "Backend rejected unknown carry_initial_prompt; application configuration rejected vocabulary; CLI rejected --vocabulary. Failure logs retained locally before implementing each seam."
+  },
+  "natural_recording": {
+    "duration_seconds": 259.8667708333333,
+    "input": "Same normalized PCM; original recording SHA-256 unchanged",
+    "small_no_hints": "Text and segments exactly matched the original upstream 0.4.3 result",
+    "small_and_turbo_hinted": "Both recognized the target library name after 200 seconds; neither inserted a selected unspoken vocabulary term",
+    "installed_search": "One matching segment at 208.48-224.96 seconds; frame inspection returned 217.015 seconds",
+    "accuracy_limit": "No independent human reference transcript or word-error-rate measurement. Hints can bias recognition and remain probabilistic."
+  },
+  "review": {
+    "fixed_point": "cb222c2e081f7f10c14d49718b520d06a2ca06d0",
+    "standards": "No actionable findings. Small transcription-owned interface, existing cache boundary, no transcript rewriting or speculative framework.",
+    "spec": "Issue 9 acceptance implemented and locally verified. No automatic vocabulary discovery or unrelated application changes."
+  },
+  "privacy": "Private vocabulary, natural transcript text, original media, and screenshots remain local and gitignored. Public tests use generic terms and synthetic media.",
+  "limitations": [
+    "Fork installation requires Git and continued maintenance until upstream adoption",
+    "Supported local ASR remains Apple Silicon with separately downloaded pinned models",
+    "Issue 5 independent human natural-speech acceptance remains separate and pending"
+  ]
+}
