@@ -1,0 +1,26 @@
+{
+  "issue": 4,
+  "first_red": "Preparing already completed evidence with an unavailable external recognizer raised PreparationFailed instead of reusing its transcript.",
+  "validated_behaviors": [
+    "Compatible repeated preparation reuses completed evidence without invoking recognition.",
+    "Renamed identical bytes are re-associated; changed bytes at the same path receive a different reference.",
+    "Model revision, backend/runtime version, language, decoding settings, word timing, normalization version, and selected stream invalidate incompatible speech.",
+    "Changing overview sampling and returning to an older speech configuration reuse compatible transcripts.",
+    "Concurrent CLI processes return one complete generation; an interrupted CLI writer leaves the old generation readable and can be retried.",
+    "Failed replacement preserves the previous published result; an unsuccessful attempt has its own unpublished manifest.",
+    "Corrupt artifacts are not clean cache hits. Unknown manifest versions require explicit rebuilding.",
+    "Cached speech and frames remain usable without the original; uncached frames fail clearly.",
+    "Results carry source availability and generation/frame identifiers."
+  ],
+  "natural_recording_measurement": {
+    "duration_seconds": 259.8667708333333,
+    "fresh_prepare_seconds": 24.074937624973245,
+    "reused_prepare_seconds": 0.1709155419957824,
+    "search_seconds": 0.09697770798811689,
+    "fresh_inspect_seconds": 0.5603660420165397,
+    "cached_inspect_seconds": 0.10936308302916586,
+    "initial_derived_bytes": 28464305,
+    "note": "Local measurement during implementation, with model files already downloaded. It is not a performance guarantee. Older generations accumulate without automatic eviction."
+  },
+  "implementation": "POSIX advisory locks, immutable generation manifests, atomic publication, content checksums, and a small per-frame cache. No database, worker service, or cleanup scheduler."
+}

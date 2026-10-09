@@ -26,6 +26,8 @@ class _Arguments(argparse.Namespace):
     limit: int
     offset: int
     audio_stream: int | None
+    overview_frames: int
+    rebuild: bool
 
 
 def _crop(value: str) -> Crop:
@@ -44,8 +46,14 @@ def main() -> None:
     prepare = commands.add_parser("prepare")
     prepare.add_argument("source", type=Path)
     prepare.add_argument("--visual-only", action="store_true")
+    prepare.add_argument(
+        "--rebuild", action="store_true", help="Explicitly rebuild cached evidence"
+    )
     prepare.add_argument("--model", choices=MODELS, default="small")
     prepare.add_argument("--language", help="Language code; omitted means auto-detection")
+    prepare.add_argument(
+        "--overview-frames", type=int, default=12, help="Sparse overview budget (1–12)"
+    )
     prepare.add_argument(
         "--audio-stream", type=int, help="Absolute source stream index from ffprobe"
     )
@@ -87,7 +95,11 @@ def main() -> None:
                 args.store, transcriber=MLXWhisper(args.model, language=args.language)
             )
             result = evidence.prepare(
-                args.source, visual_only=args.visual_only, audio_stream=args.audio_stream
+                args.source,
+                visual_only=args.visual_only,
+                audio_stream=args.audio_stream,
+                overview_count=args.overview_frames,
+                rebuild=args.rebuild,
             )
         elif args.command == "search":
             result = evidence.search(

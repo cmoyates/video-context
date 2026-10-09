@@ -77,13 +77,29 @@ use the earliest audio/video stream start as the recording playback origin.
 Changing dimensions, changing display metadata, interlacing, arbitrary rotation,
 and HDR transfer functions remain unsupported.
 
-The original file stays untouched at its existing path and must remain available.
-Its content hash is checked before and after processing. A schema-versioned
-manifest is published atomically only after all overview artifacts succeed.
-Repeated preparations retain older artifacts; interrupted work is not published.
-There is no automatic cleanup or concurrency/retry manager in this slice. Stores
-contain local source paths and derived images; the default store is
-`~/Library/Caches/video-context`.
+The original stays untouched. Its content hash identifies the recording and is
+checked around fresh extraction. Repeating preparation with compatible settings
+reuses completed evidence. Renamed identical files can be re-associated by preparing
+their new path. `--overview-frames 1..12` changes only visual sampling; it reuses
+compatible speech. Switching back to an earlier speech configuration also reuses
+its completed transcript. `--visual-only` may retain already cached speech.
+
+Writers for each recording are serialized with a POSIX file lock. Complete
+generations publish atomically; interruption or a failed replacement preserves
+the previous result. `generation` and `generation_manifest` identify the immutable
+snapshot. Search and inspection also return generation identifiers; frames have
+stable source-frame identifiers and crop coordinates. Keep these with evidence
+citations when models or settings change.
+
+Cached artifacts are checked by checksum. Damaged derived artifacts are rebuilt
+when possible; invalid manifests or unsupported schemas require `prepare ...
+--rebuild`. This also upgrades stores from the initial schema. Cached speech and
+frames remain readable if the original disappears, with `source_status` reporting
+`unavailable` or `changed`. An uncached frame still requires the original bytes.
+
+No automatic eviction or deletion runs. Older generations and interrupted work
+remain on disk. Stores contain local source paths, audio, text, and images; the
+default store is `~/Library/Caches/video-context`.
 
 Python callers use `RecordingEvidence(Path(store)).prepare(Path(source))` and
 `.inspect(recording_id, at=seconds)`, imported from `video_context`. Results are

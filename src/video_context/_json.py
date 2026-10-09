@@ -31,3 +31,9 @@ def number(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValueError("Expected a finite number")
     return float(value)
+
+
+def boolean(value: object) -> bool:
+    if type(value) is not bool:
+        raise ValueError("Expected a boolean")
+    return value

@@ -48,7 +48,7 @@ def test_preparation_describes_sparse_visual_evidence(silent_clip: Path, tmp_pat
     ]:
         assert Path(path).is_absolute() and Path(path).is_file()
     manifest = json.loads(Path(recording.manifest).read_text())
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert manifest["status"] == "complete"
     assert silent_clip.read_bytes() == original
 
@@ -74,7 +74,7 @@ def test_modified_source_cannot_be_used_as_old_evidence(silent_clip: Path, tmp_p
     )
     silent_clip.write_bytes(replacement.read_bytes())
     with pytest.raises(ValueError, match="Source changed"):
-        evidence.inspect(recording.recording_id, at=0)
+        evidence.inspect(recording.recording_id, at=0.8)
 
 
 @pytest.mark.parametrize("change", [{"status": "partial"}, {"schema_version": 42}, {"frames": []}])

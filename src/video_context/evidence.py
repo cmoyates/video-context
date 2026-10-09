@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import math
 import re
-import subprocess
-from dataclasses import asdict, dataclass, field
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Literal, overload
@@ -14,21 +16,22 @@ from uuid import uuid4
 from PIL import Image, ImageDraw
 
 from ._json import integer as _integer
+from ._json import number as _number
 from ._json import object_ as _object
 from ._json import objects as _objects
 from ._json import text as _text
+from .media import Crop, _extract, _normalize_audio, _parse_video, _run, _Video
 from .transcription import (
     MLXWhisper,
-    Normalization,
     SearchResult,
     Segment,
+    SourceStatus,
     Transcriber,
     Transcript,
+    read_transcript,
     recognize,
     segments,
 )
-
-type Crop = tuple[int, int, int, int]
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,11 @@ class PreparedRecording:
     overview: Overview
     transcript: Transcript | None = None
     audio_error: str | None = None
+    cache_status: Literal["prepared", "reused", "rebuilt"] = "prepared"
+    generation: str = ""
+    published: bool = True
+    source_status: SourceStatus = "available"
+    generation_manifest: str = ""
 
 
 class PreparationFailed(ValueError):
@@ -61,6 +69,11 @@ class Frame:
     path: str
     status: Literal["ready"] = "ready"
     segments: list[Segment] = field(default_factory=list)
+    source_status: SourceStatus = "available"
+    recording_id: str = ""
+    generation: str = ""
+    frame_id: str = ""
+    crop: Crop | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +83,10 @@ class NoFrame:
     path: None = None
     status: Literal["no_frame"] = "no_frame"
     segments: list[Segment] = field(default_factory=list)
+    source_status: SourceStatus = "available"
+    recording_id: str = ""
+    generation: str = ""
+    frame_id: None = None
 
 
 @dataclass(frozen=True)
@@ -89,70 +106,10 @@ class Inspection:
     width: int
     height: int
     segments: list[Segment] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class _Video:
-    width: int
-    height: int
-    duration: Fraction
-    time_base: Fraction
-    pts: tuple[int, ...]
-    origin: Fraction
-
-
-def _extract(
-    source: str, indices: list[int], directory: Path, video: _Video, crop: Crop | None = None
-) -> dict[int, Path]:
-    indices = sorted(set(indices))
-    if not indices:
-        return {}
-    prefix = uuid4().hex
-    selection = "+".join(f"eq(n\\,{index})" for index in indices)
-    filters = f"select={selection},scale={video.width}:{video.height},setsar=1"
-    if crop is not None:
-        x, y, width, height = crop
-        filters += f",format=rgb24,crop={width}:{height}:{x}:{y}:exact=1"
-    _run(
-        [
-            "ffmpeg",
-            "-v",
-            "error",
-            "-nostdin",
-            "-xerror",
-            "-i",
-            source,
-            "-map",
-            "0:v:0",
-            "-vf",
-            filters,
-            "-frames:v",
-            str(len(indices)),
-            "-fps_mode",
-            "passthrough",
-            "-enc_time_base",
-            "-1",
-            str(directory / f"{prefix}-%03d.png"),
-        ]
-    )
-    paths = {
-        index: directory / f"{prefix}-{slot:03d}.png" for slot, index in enumerate(indices, start=1)
-    }
-    if not all(path.is_file() for path in paths.values()):
-        raise ValueError("Decoder did not produce every requested frame")
-    return paths
-
-
-def _run(command: list[str]) -> str:
-    try:
-        result = subprocess.run(command, check=True, capture_output=True, text=True)
-    except FileNotFoundError as exc:
-        raise ValueError(f"Required tool {command[0]} is missing; install FFmpeg") from exc
-    except subprocess.CalledProcessError as exc:
-        raise ValueError(f"{command[0]} failed: {exc.stderr.strip()}") from exc
-    if result.stderr.strip():
-        raise ValueError(f"{command[0]} reported decoding errors: {result.stderr.strip()}")
-    return result.stdout
+    source_status: SourceStatus = "available"
+    recording_id: str = ""
+    generation: str = ""
+    crop: Crop | None = None
 
 
 def _digest(source: Path) -> str:
@@ -160,142 +117,126 @@ def _digest(source: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def _parse_video(data: dict[str, object]) -> _Video:
-    streams = _objects(data["streams"])
-    if len(streams) != 1:
-        raise ValueError("Expected one video stream")
-    stream = streams[0]
-    frames = _objects(data["frames"])
-    if not frames:
-        raise ValueError("No video frames found")
-    pts = tuple(_integer(frame["pts"]) for frame in frames)
-    time_base = Fraction(_text(stream["time_base"]))
-    origin = Fraction(_text(data.get("timeline_origin", "0")))
-    duration = Fraction(_text(data.get("timeline_duration", stream["duration"])))
-    if time_base <= 0 or duration <= 0:
-        raise ValueError("Unsupported video time base or duration")
-    if any(b <= a for a, b in zip(pts, pts[1:], strict=False)):
-        raise ValueError("Unsupported timing: frame presentation times must increase")
-    if pts[0] * time_base < origin or pts[-1] * time_base - origin >= duration:
-        raise ValueError("Unsupported timing: frames outside recording timeline")
-    if "nb_frames" in stream and int(_text(stream["nb_frames"])) != len(frames):
-        raise ValueError("Incomplete video: decoded frame count disagrees with stream")
-    width, height = _integer(stream["width"]), _integer(stream["height"])
-    if (
-        width <= 0
-        or height <= 0
-        or any(frame.get("width") != width or frame.get("height") != height for frame in frames)
-    ):
-        raise ValueError("Unsupported display: invalid or changing dimensions")
-    sar = stream.get("sample_aspect_ratio", "1:1")
-    if any(frame.get("sample_aspect_ratio", sar) != sar for frame in frames):
-        raise ValueError("Unsupported display: changing pixel aspect ratio")
-    ratio = Fraction(1) if sar == "N/A" else Fraction(_text(sar).replace(":", "/"))
-    if ratio <= 0:
-        raise ValueError("Unsupported display: invalid pixel aspect ratio")
-    width = round(width * ratio)
-    if any(
-        item.get("color_transfer") in ("smpte2084", "arib-std-b67") for item in (stream, *frames)
-    ):
-        raise ValueError("Unsupported display: HDR transfer function")
-    if stream.get("field_order", "progressive") not in ("progressive", "unknown"):
-        raise ValueError("Unsupported display: interlaced video")
-    if any(frame.get("interlaced_frame") != 0 for frame in frames):
-        raise ValueError("Unsupported display: interlaced or unknown frame structure")
-    matrices = [
-        side
-        for side in _objects(stream.get("side_data_list", []))
-        if side.get("side_data_type") == "Display Matrix"
-    ]
-    if any(
-        side.get("side_data_type") == "Display Matrix"
-        for frame in frames
-        for side in _objects(frame.get("side_data_list", []))
-    ):
-        raise ValueError("Unsupported display: changing display matrix")
-    if matrices:
-        rotation = _integer(matrices[0]["rotation"])
-        if len(matrices) != 1 or rotation % 90:
-            raise ValueError("Unsupported display: only quarter-turn rotations are supported")
-        if rotation % 180:
-            width, height = height, width
-    if any(
-        frame.get(f"crop_{edge}", 0) != 0
-        for frame in frames
-        for edge in ("top", "bottom", "left", "right")
-    ):
-        raise ValueError("Unsupported display: frame cropping metadata")
-    return _Video(width, height, duration, time_base, pts, origin)
+def _source_status(source: Path, recording_id: str) -> SourceStatus:
+    try:
+        digest = _digest(source)
+    except OSError:
+        return "unavailable"
+    return "available" if digest == recording_id else "changed"
 
 
-def _normalize_audio(
-    source: Path, stream: dict[str, object], video: _Video, audio: Path
-) -> Normalization:
-    index = _integer(stream["index"])
-    base = Fraction(_text(stream["time_base"]))
-    rate = int(_text(stream["sample_rate"]))
-    probe = _object(
-        json.loads(
-            _run(
-                [
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-select_streams",
-                    str(index),
-                    "-show_frames",
-                    "-show_entries",
-                    "frame=pts,nb_samples",
-                    "-of",
-                    "json",
-                    str(source),
-                ]
-            )
+def _prepared(data: dict[str, object], video: _Video) -> PreparedRecording:
+    raw = _object(data["recording"])
+    overview = _object(raw["overview"])
+    frames = [
+        Frame(
+            _number(f["requested_time"]),
+            _number(f["actual_time"]),
+            _text(f["path"]),
+            recording_id=_text(f["recording_id"]),
+            generation=_text(f["generation"]),
+            frame_id=_text(f["frame_id"]),
         )
+        for f in _objects(overview["frames"])
+    ]
+    transcript = (
+        None
+        if data.get("transcript") is None
+        else read_transcript(data["transcript"], float(video.duration))
     )
-    frames = _objects(probe["frames"])
-    if not frames or base <= 0 or rate <= 0:
-        raise ValueError("Unsupported audio timeline: missing samples or time base")
-    previous_end = video.origin
-    for frame in frames:
-        start = _integer(frame["pts"]) * base
-        count = _integer(frame["nb_samples"])
-        if count <= 0 or start < previous_end - Fraction(1, rate):
-            raise ValueError(
-                "Unsupported audio timeline: overlapping or reversed sample timestamps"
-            )
-        previous_end = start + Fraction(count, rate)
-    filters = (
-        f"asetpts=PTS-({video.origin})/TB,aresample=16000:async=1:first_pts=0:"
-        "min_comp=0.0000625:min_hard_comp=0.0000625,"
-        f"apad=whole_dur={float(video.duration)},atrim=end={float(video.duration)}"
+    status: Literal["no_audio", "skipped", "ready", "empty", "failed"]
+    if raw["audio_status"] == "no_audio":
+        status = "no_audio"
+    elif raw["audio_status"] == "skipped":
+        status = "skipped"
+    elif raw["audio_status"] == "ready":
+        status = "ready"
+    elif raw["audio_status"] == "empty":
+        status = "empty"
+    elif raw["audio_status"] == "failed":
+        status = "failed"
+    else:
+        raise ValueError("Invalid audio availability")
+    if status in ("ready", "empty") and (transcript is None or transcript.status != status):
+        raise ValueError("Transcript is missing or incomplete")
+    return PreparedRecording(
+        _text(raw["recording_id"]),
+        _text(data["source"]),
+        _text(raw["manifest"]),
+        float(video.duration),
+        video.width,
+        video.height,
+        status,
+        "ready",
+        Overview(_text(overview["path"]), frames),
+        transcript,
+        None if raw.get("audio_error") is None else _text(raw["audio_error"]),
+        generation=_text(raw.get("generation", "")),
+        generation_manifest=_text(raw.get("generation_manifest", "")),
     )
-    _run(
-        [
-            "ffmpeg",
-            "-v",
-            "error",
-            "-nostdin",
-            "-copyts",
-            "-i",
-            str(source),
-            "-map",
-            f"0:{index}",
-            "-vn",
-            "-af",
-            filters,
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            "-c:a",
-            "pcm_s16le",
-            str(audio),
-        ]
+
+
+def _publish(
+    data: dict[str, object], result: PreparedRecording, directory: Path, *, publish: bool = True
+) -> PreparedRecording:
+    directory.mkdir(parents=True, exist_ok=True)
+    result = replace(
+        result,
+        generation=directory.name,
+        published=publish,
+        manifest=result.manifest if publish else str(directory / "manifest.json"),
+        generation_manifest=str(directory / "manifest.json"),
+        overview=replace(
+            result.overview,
+            frames=[
+                replace(f, recording_id=result.recording_id, generation=directory.name)
+                for f in result.overview.frames
+            ],
+        ),
     )
-    return Normalization(
-        index, _integer(stream["start_pts"]), str(base), str(video.origin), filters
-    )
+    data["recording"] = asdict(result)
+    data["artifact_hashes"] = {path: _digest(Path(path)) for path in _artifacts(result)}
+    contents = json.dumps(data)
+    (directory / "manifest.json").write_text(contents)
+    (directory / "manifest.sha256").write_text(hashlib.sha256(contents.encode()).hexdigest())
+    if publish:
+        temporary = directory / "publish.json"
+        temporary.write_text(contents)
+        temporary.replace(Path(result.manifest))
+    return result
+
+
+def _artifacts(recording: PreparedRecording) -> list[str]:
+    paths = [recording.overview.path, *(frame.path for frame in recording.overview.frames)]
+    if recording.transcript is not None:
+        paths.extend(
+            [
+                recording.transcript.path,
+                recording.transcript.audio_path,
+                recording.transcript.raw_path,
+            ]
+        )
+    return paths
+
+
+def _require_artifacts(data: dict[str, object], paths: list[str]) -> None:
+    try:
+        hashes = _object(data["artifact_hashes"])
+        for path in paths:
+            if _digest(Path(path)) != _text(hashes.get(path)):
+                raise ValueError(f"Cached artifact is corrupt: {path}; prepare again to rebuild")
+    except (OSError, KeyError) as exc:
+        raise ValueError(
+            f"Cached artifact is unavailable; prepare again to rebuild: {exc}"
+        ) from exc
+
+
+def _valid_artifacts(data: dict[str, object], paths: list[str]) -> bool:
+    try:
+        _require_artifacts(data, paths)
+    except ValueError:
+        return False
+    return True
 
 
 class RecordingEvidence:
@@ -306,10 +247,117 @@ class RecordingEvidence:
         self.transcriber = transcriber if transcriber is not None else MLXWhisper()
 
     def prepare(
-        self, source: Path, *, visual_only: bool = False, audio_stream: int | None = None
+        self,
+        source: Path,
+        *,
+        visual_only: bool = False,
+        audio_stream: int | None = None,
+        overview_count: int = 12,
+        rebuild: bool = False,
     ) -> PreparedRecording:
         source = source.expanduser().resolve()
         recording_id = _digest(source)
+        with self._writer(recording_id):
+            if _digest(source) != recording_id:
+                raise ValueError("Source changed while waiting to prepare; retry with stable media")
+            return self._prepare(
+                source,
+                recording_id,
+                visual_only=visual_only,
+                audio_stream=audio_stream,
+                overview_count=overview_count,
+                rebuild=rebuild,
+            )
+
+    @contextmanager
+    def _writer(self, recording_id: str) -> Generator[None, None, None]:
+        directory = self.store / recording_id
+        directory.mkdir(parents=True, exist_ok=True)
+        with (directory / ".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def _prepare(
+        self,
+        source: Path,
+        recording_id: str,
+        *,
+        visual_only: bool,
+        audio_stream: int | None,
+        overview_count: int,
+        rebuild: bool,
+    ) -> PreparedRecording:
+        if type(overview_count) is not int or not 1 <= overview_count <= 12:
+            raise ValueError("Overview count must be an integer from 1 to 12")
+        manifest = self.store / recording_id / "manifest.json"
+        previous = None
+        reusable_transcript = None
+        if manifest.is_file() and rebuild:
+            try:
+                data, video = self._load(recording_id)
+                previous = _prepared(data, video)
+            except (ValueError, OSError):
+                # Explicit rebuilding does not depend on an unreadable older schema/artifact index.
+                previous = None
+        if manifest.is_file() and not rebuild:
+            data, video = self._load(recording_id)
+            previous = _prepared(data, video)
+            audio_indices = [
+                _integer(s["index"])
+                for s in _objects(data["source_streams"])
+                if s.get("codec_type") == "audio"
+            ]
+            if audio_stream is not None and audio_stream not in audio_indices:
+                raise ValueError("Selected audio stream is unavailable")
+            selected_index = (
+                audio_stream if audio_stream is not None else next(iter(audio_indices), None)
+            )
+            transcript = previous.transcript
+            compatible = audio_stream is None and (
+                previous.audio_status == "no_audio"
+                or (visual_only and previous.audio_status == "skipped")
+            )
+            if transcript is not None:
+                compatible = (
+                    visual_only or transcript.configuration == self.transcriber.configuration
+                ) and selected_index == transcript.normalization.source_stream
+                if compatible and _valid_artifacts(
+                    data, [transcript.path, transcript.audio_path, transcript.raw_path]
+                ):
+                    reusable_transcript = transcript
+            if reusable_transcript is None and selected_index is not None:
+                reusable_transcript = self._previous_transcript(
+                    recording_id, selected_index, visual_only
+                )
+            if (
+                ((compatible and transcript is None) or reusable_transcript is not None)
+                and len(previous.overview.frames) == min(overview_count, len(video.pts))
+                and _valid_artifacts(
+                    data, [previous.overview.path, *(f.path for f in previous.overview.frames)]
+                )
+            ):
+                result = replace(
+                    previous,
+                    source=str(source),
+                    cache_status="reused",
+                    transcript=reusable_transcript,
+                    audio_status=reusable_transcript.status
+                    if reusable_transcript is not None
+                    else previous.audio_status,
+                    audio_error=None,
+                )
+                if _digest(source) != recording_id:
+                    raise ValueError("Source changed during preparation; prepare it again")
+                if previous.source != str(source) or previous.transcript != reusable_transcript:
+                    data["source"] = str(source)
+                    data["transcript"] = (
+                        asdict(reusable_transcript) if reusable_transcript is not None else None
+                    )
+                    return _publish(data, result, manifest.parent / uuid4().hex)
+                return result
         directory = self.store / recording_id / uuid4().hex
         directory.mkdir(parents=True)
         manifest = directory.parent / "manifest.json"
@@ -363,6 +411,7 @@ class RecordingEvidence:
             )
         )
         data["source"] = str(source)
+        data["source_streams"] = streams
         try:
             timings = [
                 (
@@ -382,7 +431,7 @@ class RecordingEvidence:
             video = _parse_video(data)
         except (KeyError, ZeroDivisionError) as exc:
             raise ValueError(f"Unsupported or incomplete video metadata: {exc}") from exc
-        count = min(12, len(video.pts))
+        count = min(overview_count, len(video.pts))
         indices = [round(i * (len(video.pts) - 1) / max(1, count - 1)) for i in range(count)]
         overview_frames = []
         cell_height = min(320, round(232 * video.height / video.width)) + 30
@@ -393,7 +442,7 @@ class RecordingEvidence:
         for slot, index in enumerate(indices):
             path = paths[index]
             actual = float(video.pts[index] * video.time_base - video.origin)
-            overview_frames.append(Frame(actual, actual, str(path)))
+            overview_frames.append(Frame(actual, actual, str(path), frame_id=f"f{index:06d}"))
             x, y = (slot % 4) * 240, 40 + (slot // 4) * cell_height
             with Image.open(path) as frame_image:
                 frame_image.thumbnail((232, cell_height - 30))
@@ -401,9 +450,11 @@ class RecordingEvidence:
             draw.text((x + 4, y + cell_height - 22), f"{actual:.6f} s", fill="white")
         overview_path = directory / "overview.png"
         sheet.save(overview_path)
-        transcript = None
+        transcript = reusable_transcript
         failure: Exception | None = None
-        if audio_status != "no_audio" and not visual_only:
+        if transcript is not None:
+            audio_status = transcript.status
+        elif audio_status != "no_audio" and not visual_only:
             assert selected_audio is not None
             audio = directory / "audio.wav"
             try:
@@ -412,7 +463,14 @@ class RecordingEvidence:
                     self.transcriber, audio, float(video.duration), normalization
                 )
                 audio_status = transcript.status
-            except (OSError, ValueError, RuntimeError, ImportError) as exc:
+            except (
+                OSError,
+                ValueError,
+                RuntimeError,
+                ImportError,
+                KeyError,
+                ZeroDivisionError,
+            ) as exc:
                 # External recognition boundary: publish usable visuals, then re-raise with context.
                 failure = exc
                 audio_status = "failed"
@@ -428,38 +486,76 @@ class RecordingEvidence:
             Overview(str(overview_path), overview_frames),
             transcript,
             str(failure) if failure is not None else None,
+            cache_status="rebuilt" if manifest.is_file() else "prepared",
         )
-        data["schema_version"] = 1
+        data["schema_version"] = 2
         data["status"] = "complete"
         data["recording"] = asdict(result)
         data["transcript"] = asdict(transcript) if transcript is not None else None
-        temporary = directory / "manifest.json"
-        temporary.write_text(json.dumps(data))
         if _digest(source) != recording_id:
             raise ValueError("Source changed during preparation; prepare it again")
-        temporary.replace(manifest)
+        result = _publish(data, result, directory, publish=failure is None or previous is None)
         if failure is not None:
             raise PreparationFailed(result) from failure
         return result
+
+    def _previous_transcript(
+        self, recording_id: str, audio_stream: int, visual_only: bool
+    ) -> Transcript | None:
+        for path in sorted((self.store / recording_id).glob("*/manifest.json")):
+            try:
+                contents = path.read_bytes()
+                if hashlib.sha256(contents).hexdigest() != path.with_suffix(".sha256").read_text():
+                    continue
+                data = _object(json.loads(contents))
+                if data.get("schema_version") != 2 or data.get("status") != "complete":
+                    continue
+                recording = _prepared(data, _parse_video(data))
+                transcript = recording.transcript
+                if (
+                    recording.recording_id == recording_id
+                    and recording.generation == path.parent.name
+                    and transcript is not None
+                    and transcript.normalization.source_stream == audio_stream
+                    and (visual_only or transcript.configuration == self.transcriber.configuration)
+                    and _valid_artifacts(
+                        data, [transcript.path, transcript.audio_path, transcript.raw_path]
+                    )
+                ):
+                    return transcript
+            except (OSError, ValueError, KeyError, ZeroDivisionError):
+                # An incomplete/damaged historical generation is never a cache hit.
+                continue
+        return None
 
     def _load(self, recording_id: str) -> tuple[dict[str, object], _Video]:
         if not re.fullmatch(r"[0-9a-f]{64}", recording_id):
             raise ValueError("Invalid recording reference: expected a SHA-256 identifier")
         directory = self.store / recording_id
         try:
-            data = _object(json.loads((directory / "manifest.json").read_text()))
+            contents = (directory / "manifest.json").read_text()
+            data = _object(json.loads(contents))
         except FileNotFoundError as exc:
             raise ValueError(f"Recording {recording_id} is not prepared in {self.store}") from exc
         try:
-            if data.get("schema_version") != 1 or data.get("status") != "complete":
+            if data.get("schema_version") != 2 or data.get("status") != "complete":
                 raise ValueError("unsupported version or incomplete state")
             video = _parse_video(data)
             _text(data["source"])
-        except (KeyError, ValueError, ZeroDivisionError) as exc:
-            raise ValueError(f"Invalid recording manifest: {exc}") from exc
-        source = Path(_text(data["source"]))
-        if _digest(source) != recording_id:
-            raise ValueError("Source changed since preparation; prepare it again")
+            recording = _prepared(data, video)
+            if recording.recording_id != recording_id or not re.fullmatch(
+                r"[0-9a-f]{32}", recording.generation
+            ):
+                raise ValueError("recording reference or generation is invalid")
+            if (directory / recording.generation / "manifest.json").read_text() != contents:
+                raise ValueError("published manifest differs from its immutable generation")
+            if (
+                hashlib.sha256(contents.encode()).hexdigest()
+                != (directory / recording.generation / "manifest.sha256").read_text()
+            ):
+                raise ValueError("generation checksum does not match")
+        except (KeyError, ValueError, ZeroDivisionError, OSError) as exc:
+            raise ValueError(f"Invalid recording manifest: {exc}; prepare with --rebuild") from exc
         return data, video
 
     def search(
@@ -471,6 +567,8 @@ class RecordingEvidence:
         transcript = data.get("transcript")
         if transcript is None:
             raise ValueError("Transcript unavailable for this recording")
+        stored = read_transcript(transcript, float(video.duration))
+        _require_artifacts(data, [stored.path, stored.audio_path, stored.raw_path])
         matches = [
             s
             for s in segments(_object(transcript)["segments"], float(video.duration))
@@ -481,7 +579,65 @@ class RecordingEvidence:
             query,
             matches[offset : offset + limit],
             offset + limit if offset + limit < len(matches) else None,
+            _source_status(Path(_text(data["source"])), recording_id),
+            _text(_object(data["recording"])["generation"]),
         )
+
+    def _frames(
+        self,
+        recording_id: str,
+        data: dict[str, object],
+        video: _Video,
+        indices: list[int],
+        crop: Crop | None,
+        *,
+        locked: bool = False,
+    ) -> dict[int, Path]:
+        directory = self.store / recording_id / "frames"
+        directory.mkdir(exist_ok=True)
+        paths = {}
+        overview = _prepared(data, video).overview
+        crop_key = "full" if crop is None else "-".join(str(v) for v in crop)
+        for index in set(indices):
+            entry = directory / f"v1-{index}-{crop_key}.json"
+            if entry.is_file():
+                try:
+                    cached = _object(json.loads(entry.read_text()))
+                    path = Path(_text(cached["path"]))
+                    if _digest(path) == _text(cached["sha256"]):
+                        paths[index] = path
+                        continue
+                except (OSError, ValueError, KeyError):
+                    # A damaged derived frame can be rebuilt from the verified original below.
+                    pass
+            if crop is None:
+                actual = float(video.pts[index] * video.time_base - video.origin)
+                frame = next((f for f in overview.frames if f.actual_time == actual), None)
+                if frame is not None and _valid_artifacts(data, [frame.path]):
+                    paths[index] = Path(frame.path)
+        missing = sorted(set(indices) - paths.keys())
+        if missing:
+            if not locked:
+                with self._writer(recording_id):
+                    return self._frames(recording_id, data, video, indices, crop, locked=True)
+            source = Path(_text(data["source"]))
+            status = _source_status(source, recording_id)
+            if status != "available":
+                raise ValueError(
+                    f"Source {status}; requested frame is not cached. "
+                    "Re-associate identical bytes with prepare."
+                )
+            output = directory / uuid4().hex
+            output.mkdir()
+            extracted = _extract(str(source), missing, output, video, crop)
+            if _digest(source) != recording_id:
+                raise ValueError("Source changed during inspection; prepare it again")
+            for index, path in extracted.items():
+                entry = output / f"{index}.json"
+                entry.write_text(json.dumps({"path": str(path), "sha256": _digest(path)}))
+                entry.replace(directory / f"v1-{index}-{crop_key}.json")
+            paths.update(extracted)
+        return paths
 
     @overload
     def inspect(
@@ -512,7 +668,11 @@ class RecordingEvidence:
         if at is not None and (not math.isfinite(at) or at < 0):
             raise ValueError("Requested time must be finite and nonnegative (seconds)")
         data, video = self._load(recording_id)
+        generation = _text(_object(data["recording"])["generation"])
         transcript = data.get("transcript")
+        if transcript is not None:
+            stored = read_transcript(transcript, float(video.duration))
+            _require_artifacts(data, [stored.path, stored.audio_path, stored.raw_path])
         speech = (
             []
             if transcript is None
@@ -530,12 +690,12 @@ class RecordingEvidence:
                 or y + height > video.height
             ):
                 raise ValueError("Invalid crop: use x,y,width,height within displayed dimensions")
-        directory = self.store / recording_id
         source = Path(_text(data["source"]))
+        source_status = _source_status(source, recording_id)
         if at is None:
             if start is None or end is None or not all(math.isfinite(t) for t in (start, end)):
                 raise ValueError("Interval requires finite start and end")
-            if start < 0 or end <= start or Fraction(str(end)) > video.duration:
+            if start < 0 or end <= start or end > float(video.duration):
                 raise ValueError("Interval must satisfy 0 <= start < end <= duration")
             first, stop = Fraction(str(start)), Fraction(str(end))
             available = [
@@ -558,14 +718,23 @@ class RecordingEvidence:
                     if match is not None:
                         selected_frames.append((match[0], requested, match[1]))
                     requested += step
-            paths = _extract(
-                str(source), [i for i, _, _ in selected_frames], directory, video, crop
+            paths = self._frames(
+                recording_id, data, video, [i for i, _, _ in selected_frames], crop
             )
             frames = []
             for index, requested, actual in selected_frames:
-                frames.append(Frame(float(requested), float(actual), str(paths[index])))
-            if _digest(source) != recording_id:
-                raise ValueError("Source changed during inspection; prepare it again")
+                frames.append(
+                    Frame(
+                        float(requested),
+                        float(actual),
+                        str(paths[index]),
+                        source_status=source_status,
+                        recording_id=recording_id,
+                        generation=generation,
+                        frame_id=f"f{index:06d}",
+                        crop=crop,
+                    )
+                )
             return Inspection(
                 start,
                 end,
@@ -575,6 +744,10 @@ class RecordingEvidence:
                 video.width,
                 video.height,
                 [s for s in speech if s.start < end and s.end > start],
+                source_status,
+                recording_id,
+                generation,
+                crop,
             )
         requested_time = Fraction(str(at))
         selected = next(
@@ -586,14 +759,23 @@ class RecordingEvidence:
             None,
         )
         if selected is None:
-            return NoFrame(at, segments=[s for s in speech if s.start <= at < s.end])
+            return NoFrame(
+                at,
+                segments=[s for s in speech if s.start <= at < s.end],
+                source_status=source_status,
+                recording_id=recording_id,
+                generation=generation,
+            )
         index, pts = selected
-        path = _extract(str(source), [index], directory, video, crop)[index]
-        if _digest(source) != recording_id:
-            raise ValueError("Source changed during inspection; prepare it again")
+        path = self._frames(recording_id, data, video, [index], crop)[index]
         return Frame(
             at,
             float(pts * video.time_base - video.origin),
             str(path),
             segments=[s for s in speech if s.start <= at < s.end],
+            source_status=source_status,
+            recording_id=recording_id,
+            generation=generation,
+            frame_id=f"f{index:06d}",
+            crop=crop,
         )

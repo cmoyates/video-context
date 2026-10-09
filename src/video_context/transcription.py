@@ -8,12 +8,14 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Literal, Protocol
 
-from ._json import number, object_, objects, text
+from ._json import boolean, integer, number, object_, objects, text
 
 MODELS = {
     "small": ("mlx-community/whisper-small-mlx", "45f3915923c7a79a5a5b5a7d909d39aeb0e5630e"),
     "turbo": ("mlx-community/whisper-large-v3-turbo", "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"),
 }
+
+type SourceStatus = Literal["available", "unavailable", "changed"]
 
 
 def model_path(name: str, *, download: bool = False) -> Path:
@@ -161,6 +163,8 @@ class SearchResult:
     query: str
     matches: list[Segment]
     next_offset: int | None
+    source_status: SourceStatus = "available"
+    generation: str = ""
 
 
 def segments(value: object, duration: float) -> list[Segment]:
@@ -208,5 +212,49 @@ def recognize(
         transcriber.configuration,
         str(audio),
         str(raw_path),
+        normalization,
+    )
+
+
+def read_transcript(value: object, duration: float) -> Transcript:
+    data = object_(value)
+    config = object_(data["configuration"])
+    configuration = TranscriptionConfig(
+        text(config["backend"]),
+        text(config["backend_version"]),
+        text(config["model"]),
+        text(config["revision"]),
+        None if config["language"] is None else text(config["language"]),
+        boolean(config["word_timestamps"]),
+        number(config["temperature"]),
+        boolean(config["condition_on_previous_text"]),
+        integer(config["normalization_version"]),
+        text(config["runtime_version"]),
+        boolean(config["fp16"]),
+        text(config["task"]),
+    )
+    normal = object_(data["normalization"])
+    normalization = Normalization(
+        integer(normal["source_stream"]),
+        integer(normal["source_start_pts"]),
+        text(normal["source_time_base"]),
+        text(normal["recording_origin"]),
+        text(normal["filter_graph"]),
+        integer(normal["sample_rate"]),
+        integer(normal["channels"]),
+        integer(normal["version"]),
+    )
+    recognized = segments(data["segments"], duration)
+    status = "ready" if recognized else "empty"
+    if data["status"] != status:
+        raise ValueError("Transcript availability disagrees with its segments")
+    return Transcript(
+        status,
+        text(data["language"]),
+        text(data["path"]),
+        recognized,
+        configuration,
+        text(data["audio_path"]),
+        text(data["raw_path"]),
         normalization,
     )

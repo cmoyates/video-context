@@ -194,3 +194,28 @@ def test_short_frame_intervals_are_not_rounded_to_nominal_rate(tmp_path: Path) -
     recording = evidence.prepare(source)
     result = evidence.inspect(recording.recording_id, start=0, end=1, source_frames=True)
     assert [f.actual_time for f in result.frames] == [0, 1 / 300, 2 / 300]
+
+
+def test_returned_fractional_duration_is_a_valid_interval_endpoint(tmp_path: Path) -> None:
+    source = tmp_path / "fractional.mov"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=16x16:r=15",
+            "-frames:v",
+            "1",
+            "-c:v",
+            "libx264",
+            str(source),
+        ],
+        check=True,
+    )
+    evidence = RecordingEvidence(tmp_path / "store")
+    recording = evidence.prepare(source)
+    result = evidence.inspect(recording.recording_id, start=0, end=recording.duration)
+    assert [f.actual_time for f in result.frames] == [0]
