@@ -1,0 +1,8 @@
+# For existing ty projects. In pyproject.toml, use [tool.ty.rules].
+# Merge into effective settings; preserve other rules and project overrides.
+[rules]
+missing-type-argument = "error"
+unsound-return-statement = "error"
+redundant-cast = "error"
+unused-ignore-comment = "error"
+blanket-ignore-comment = "error"

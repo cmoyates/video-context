@@ -1,0 +1,12 @@
+# Merge this policy into the effective Ruff configuration; do not replace it.
+# In pyproject.toml, use [tool.ruff.lint]. See references/configure.md.
+[lint]
+extend-select = [
+  "ANN001", "ANN002", "ANN003",
+  "ANN201", "ANN202", "ANN204", "ANN205", "ANN206", "ANN401",
+  "B006", "B008", "B009", "B010", "B012", "B018", "B023", "B904",
+  "BLE001", "E722",
+  "C400", "C401", "C402", "C403", "C404", "C405", "C406",
+  "C408", "C409", "C410", "C411", "C413", "C414",
+  "RUF017", "RUF100", "PGH003", "PGH004",
+]

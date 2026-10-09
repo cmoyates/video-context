@@ -40,6 +40,16 @@ select = [
   "B",   # flake8-bugbear
   "SIM", # flake8-simplify
 ]
+# Additive policy from .agents/skills/python-anti-slop/assets/ruff.toml.
+extend-select = [
+  "ANN001", "ANN002", "ANN003",
+  "ANN201", "ANN202", "ANN204", "ANN205", "ANN206", "ANN401",
+  "B006", "B008", "B009", "B010", "B012", "B018", "B023", "B904",
+  "BLE001", "E722",
+  "C400", "C401", "C402", "C403", "C404", "C405", "C406",
+  "C408", "C409", "C410", "C411", "C413", "C414",
+  "RUF017", "RUF100", "PGH003", "PGH004",
+]
 ignore = []
 
 [tool.ruff.format]
@@ -48,6 +58,14 @@ indent-style = "space"
 line-ending = "auto"
 
 [tool.ty]
+
+# Additive policy from .agents/skills/python-anti-slop/assets/ty.toml.
+[tool.ty.rules]
+missing-type-argument = "error"
+unsound-return-statement = "error"
+redundant-cast = "error"
+unused-ignore-comment = "error"
+blanket-ignore-comment = "error"
 
 [tool.pytest.ini_options]
 minversion = "8.0"
