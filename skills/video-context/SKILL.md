@@ -19,7 +19,8 @@ in this skill's [setup reference](references/setup.md).
    generation, immutable `generation_manifest`, stage status, and artifact paths.
    Use `--visual-only` only when visual evidence alone serves the task. A failed
    speech stage can still return usable visual evidence with nonzero exit status.
-   When the user supplies a project vocabulary, add `--vocabulary '/absolute/terms.txt'`.
+   When using a project vocabulary, pass `--vocabulary '/absolute/terms.txt'`
+   on every preparation, including cache reuse. Use the file selected for the task.
    It contains one preferred term per line, with blank lines and `#` comments ignored.
    Keep the list focused; an oversized vocabulary is an explicit error. Terms guide
    every speech window but are not proof that those words were spoken. Exact terms
@@ -67,3 +68,30 @@ publish issues, or edit an application. Take those actions only within the user'
 actual task authorization. Keep private media and transcripts local unless the
 user authorizes sharing. Finish when each relevant request has supporting
 evidence or an explicit unresolved uncertainty; identify any uninspected ranges.
+
+## Write issues and attach media
+
+When filing issues for the user, write in their first-person voice: describe what
+they see and want changed directly, rather than saying "the narrator says". Keep
+uncertainty natural, such as "I can't tell whether this is alignment or the glyph."
+Lead with the problem and desired behavior, followed by concise acceptance criteria.
+
+Keep public evidence brief: relevant media and a short caption explaining what
+it shows. Keep source-recording timestamps and detailed provenance in the local
+evidence report; readers should understand the issue without the original recording.
+Hashes, generation/segment/frame IDs, and crop coordinates do not belong in routine
+issue prose. Include device/build details only when they help understand or reproduce
+the problem. Omit filing-process and safety boilerplate.
+
+When the user asks to publish issues and authorizes sharing recording evidence,
+use screenshots for static appearance. Add a short embedded video when animation,
+timing, or an interaction sequence materially clarifies the issue. Include enough
+lead-in and aftermath to show the trigger and result; preserve the original and
+create a separate clip at normal playback speed.
+
+Mute clips by removing the audio track unless the narration adds useful context
+beyond the written issue description. When retaining narration, preserve its
+synchronization. Review the clip before upload for relevance, legibility, unrelated
+private content, and the intended audio state. Caption it briefly with the behavior
+it demonstrates. Use the issue host's attachment workflow and verify the embedded clip is viewable;
+report upload or playback blockers explicitly.
