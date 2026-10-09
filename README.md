@@ -8,9 +8,52 @@ and visual evidence that the agent can inspect alongside a codebase.
 
 ## Status
 
-Project scaffold only. Media processing, transcription, frame retrieval, and the
-Codex skill are not implemented yet. No runtime dependencies or model weights
-have been installed.
+The first slice prepares local MOV/MP4 recordings, creates a sparse overview,
+and retrieves a timestamped frame in a later CLI process. Transcription, interval
+inspection, crops, and the Codex skill remain planned. No speech model is needed
+or downloaded for visual preparation.
+
+## Prepare and inspect
+
+Requires Python 3.12+, uv, and `ffmpeg`/`ffprobe` on PATH (verified with FFmpeg 8.1.2).
+
+```bash
+uv sync --locked
+uv run video-context prepare /absolute/path/recording.mov --store ./work/evidence
+# Use recording_id from the JSON above, with the same store:
+uv run video-context inspect RECORDING_ID --at 1.15 --store ./work/evidence
+```
+
+Both commands write JSON to stdout; failures write diagnostics to stderr and exit
+nonzero. `--at` is a finite, nonnegative recording time in seconds. Inspection
+returns the first decoded frame at or after that time, with `requested_time`,
+`actual_time`, and an absolute PNG `path`. If there is no such frame, it returns
+`status: "no_frame"` with null `actual_time` and `path` (exit 0).
+
+Preparation returns a SHA-256 `recording_id`, video duration in seconds, displayed
+`width`/`height`, stage availability, a manifest path, and an overview. Open the
+overview image for orientation, then inspect individual full-resolution frames.
+The overview labels up to 12 samples spanning first to last frame; it can omit
+events. `audio_status: "no_audio"` keeps silent recordings usable; audio-bearing
+files report `not_processed` and retain visual evidence.
+
+Supported now: one progressive, unrotated video stream with square pixels,
+continuous constant frame intervals and a zero-origin timeline. Offset/variable
+timelines, frame gaps, display matrices, changing dimensions, interlacing,
+non-square pixels, and HDR transfer functions are rejected. Unsupported timing
+and display handling belongs to [issue #2](https://github.com/cmoyates/video-context/issues/2).
+
+The original file stays untouched at its existing path and must remain available.
+Its content hash is checked before and after processing. A schema-versioned
+manifest is published atomically only after all overview artifacts succeed.
+Repeated preparations retain older artifacts; interrupted work is not published.
+There is no automatic cleanup or concurrency/retry manager in this slice. Stores
+contain local source paths and derived images; the default store is
+`~/Library/Caches/video-context`.
+
+Python callers use `RecordingEvidence(Path(store)).prepare(Path(source))` and
+`.inspect(recording_id, at=seconds)`, imported from `video_context`. Results are
+dataclasses; unsupported input raises `ValueError`, filesystem failures `OSError`.
 
 Based on [cmoyates/python-template](https://github.com/cmoyates/python-template),
 commit `d241bd750afee8beee62a6a8ed2e926b3dc88731`. Template history is retained.
@@ -45,8 +88,8 @@ Repository: [cmoyates/video-context](https://github.com/cmoyates/video-context).
   existing tools, pinned source references, and local timing experiments.
 - [Glossary](GLOSSARY.md) and [local evidence decision](docs/adr/0001-local-evidence-before-interpretation.md).
 
-The proposal is not implemented. The transcription model and real-recording
-acceptance remain to be evaluated; test seams must be confirmed before TDD begins.
+The first implementation covers issue #1 at the agreed public evidence and CLI
+seams. The transcription model and narrated-recording acceptance remain to be evaluated.
 
 ## Development
 
@@ -55,16 +98,18 @@ are locked in `uv.lock`. Run commands from this directory:
 
 ```bash
 uv sync --locked
-uv run main.py
+uv run video-context --help
 uv run ruff check .
 uv run ruff format --check .
 uv run ty check
 uv run pytest
 ```
 
-The starter currently has no tests; pytest reports no tests collected (exit 5).
-Tests will live under `tests/`, with source modules under `src/`, as configured by
-the template. Local recordings and derived artifacts belong in the gitignored
+Tests under `tests/` use real FFmpeg-generated color/timing fixtures and the
+installed CLI across separate processes. A silent SpeechCatcher development
+simulator capture also exercised prepare → inspect; it is not proof of speech
+recognition or unsupported timing. Source modules live under `src/`.
+Local recordings and derived artifacts belong in the gitignored
 `input/`, `output/`, and `work/` directories.
 
 ## What's Included
