@@ -3,17 +3,33 @@
 Local preprocessing of narrated screen recordings for AI coding agents.
 
 Record a normal macOS screen recording with microphone narration, then give the
-recording's path to Codex. The intended tool will provide timestamped transcripts
+recording's path to Codex. The tool provides timestamped transcripts
 and visual evidence that the agent can inspect alongside a codebase.
 
 ## Status
 
-The first slice prepares local MOV/MP4 recordings, creates a sparse overview,
-and retrieves a timestamped frame in a later CLI process. Transcription, interval
-inspection, crops, and the Codex skill remain planned. No speech model is needed
-or downloaded for visual preparation.
+The visual slices prepare local MOV/MP4 recordings, create a sparse overview,
+and retrieve timestamped frames, intervals, and crops in later CLI processes.
+Local transcription and literal transcript search are available with the optional
+Apple Silicon ASR dependencies. The Codex skill connects these steps to a coding chat. No speech model
+is needed or downloaded for silent recordings or explicit visual-only preparation.
 
 ## Prepare and inspect
+
+For use from any repository, install the CLI and Codex skill once:
+
+```bash
+bash scripts/install.sh
+video-context models fetch turbo
+```
+
+The installer uses the locked dependencies and adds the
+[Video Context skill](skills/video-context/SKILL.md) to your personal Codex skills.
+In a new Codex chat, give it a recording path and ask to use `$video-context`.
+The CLI is installed independently of this checkout; the skill is linked here,
+so retain the checkout. `bash scripts/install.sh --visual-only` omits MLX.
+Re-run the installer after source updates. If the executable is not on PATH,
+resolve it with `uv tool dir --bin`.
 
 Requires Python 3.12+, uv, and `ffmpeg`/`ffprobe` on PATH (verified with FFmpeg 8.1.2).
 
@@ -22,7 +38,33 @@ uv sync --locked
 uv run video-context prepare /absolute/path/recording.mov --store ./work/evidence
 # Use recording_id from the JSON above, with the same store:
 uv run video-context inspect RECORDING_ID --at 1.15 --store ./work/evidence
+uv run video-context inspect RECORDING_ID --start 1.1 --end 1.4 --source-frames --store ./work/evidence
+uv run video-context inspect RECORDING_ID --at 1.2 --crop 10,10,120,60 --store ./work/evidence
 ```
+
+For narrated recordings on Apple Silicon, explicitly install and fetch a pinned
+model once. Preparation itself only uses local model files and never uploads media:
+
+```bash
+uv sync --extra asr --locked
+uv run --extra asr video-context models fetch turbo
+uv run --extra asr video-context prepare /absolute/path/narrated.mov --language en
+uv run video-context search RECORDING_ID "offline" --limit 10
+```
+
+Omit `--language` for detection. `turbo` is the default; `--model small` uses less
+memory and downloads fewer bytes. Both model revisions are pinned in the package.
+The [local comparison](docs/verification/issue-5.json) records the selection evidence
+and its human-review limitations. `--visual-only`
+skips recognition. `--audio-stream N` selects an absolute source stream index;
+otherwise the first audio stream is used. Audio is normalized to 16 kHz mono
+PCM with delayed starts and timestamp gaps preserved as silence. Normalization,
+model revision, package version, and decoding settings are recorded with evidence.
+
+Search matches literal case-insensitive substrings in recording order. Use the
+returned `next_offset` with `--offset` to continue. Inspection returns all speech
+segments overlapping the requested point or interval. Speech and word times are
+estimates: inspect surrounding moments before interpreting brief gestures.
 
 Both commands write JSON to stdout; failures write diagnostics to stderr and exit
 nonzero. `--at` is a finite, nonnegative recording time in seconds. Inspection
@@ -34,22 +76,47 @@ Preparation returns a SHA-256 `recording_id`, video duration in seconds, display
 `width`/`height`, stage availability, a manifest path, and an overview. Open the
 overview image for orientation, then inspect individual full-resolution frames.
 The overview labels up to 12 samples spanning first to last frame; it can omit
-events. `audio_status: "no_audio"` keeps silent recordings usable; audio-bearing
-files report `not_processed` and retain visual evidence.
+events. Audio status distinguishes `no_audio`, `skipped`, `ready`, `empty`, and
+`failed`. A recognition failure publishes available visuals, prints the partial
+result as JSON, reports the error on stderr, and exits nonzero. `empty` means
+recognition completed without speech segments, not that the media had no audio.
 
-Supported now: one progressive, unrotated video stream with square pixels,
-continuous constant frame intervals and a zero-origin timeline. Offset/variable
-timelines, frame gaps, display matrices, changing dimensions, interlacing,
-non-square pixels, and HDR transfer functions are rejected. Unsupported timing
-and display handling belongs to [issue #2](https://github.com/cmoyates/video-context/issues/2).
+Intervals are half-open `[start, end)`. Sampling defaults to every 0.5 seconds,
+spreading a maximum of 24 requests across longer intervals. `sampling_interval`
+reports the effective spacing. `--source-frames` returns every decoded frame in
+the interval, or asks for a narrower interval above 120 frames. Gaps never create
+invented frames. `--crop x,y,width,height` uses upright, square-pixel display
+coordinates; out-of-bounds crops fail clearly.
 
-The original file stays untouched at its existing path and must remain available.
-Its content hash is checked before and after processing. A schema-versioned
-manifest is published atomically only after all overview artifacts succeed.
-Repeated preparations retain older artifacts; interrupted work is not published.
-There is no automatic cleanup or concurrency/retry manager in this slice. Stores
-contain local source paths and derived images; the default store is
-`~/Library/Caches/video-context`.
+Supported now: one progressive video stream, variable frame intervals, nonzero
+source starts, frame gaps, quarter-turn rotation, and non-square pixels. Times
+use the earliest audio/video stream start as the recording playback origin.
+Changing dimensions, changing display metadata, interlacing, arbitrary rotation,
+and HDR transfer functions remain unsupported.
+
+The original stays untouched. Its content hash identifies the recording and is
+checked around fresh extraction. Repeating preparation with compatible settings
+reuses completed evidence. Renamed identical files can be re-associated by preparing
+their new path. `--overview-frames 1..12` changes only visual sampling; it reuses
+compatible speech. Switching back to an earlier speech configuration also reuses
+its completed transcript. `--visual-only` may retain already cached speech.
+
+Writers for each recording are serialized with a POSIX file lock. Complete
+generations publish atomically; interruption or a failed replacement preserves
+the previous result. `generation` and `generation_manifest` identify the immutable
+snapshot. Search and inspection also return generation identifiers; frames have
+stable source-frame identifiers and crop coordinates. Keep these with evidence
+citations when models or settings change.
+
+Cached artifacts are checked by checksum. Damaged derived artifacts are rebuilt
+when possible; invalid manifests or unsupported schemas require `prepare ...
+--rebuild`. This also upgrades stores from the initial schema. Cached speech and
+frames remain readable if the original disappears, with `source_status` reporting
+`unavailable` or `changed`. An uncached frame still requires the original bytes.
+
+No automatic eviction or deletion runs. Older generations and interrupted work
+remain on disk. Stores contain local source paths, audio, text, and images; the
+default store is `~/Library/Caches/video-context`.
 
 Python callers use `RecordingEvidence(Path(store)).prepare(Path(source))` and
 `.inspect(recording_id, at=seconds)`, imported from `video_context`. Results are
@@ -88,8 +155,8 @@ Repository: [cmoyates/video-context](https://github.com/cmoyates/video-context).
   existing tools, pinned source references, and local timing experiments.
 - [Glossary](GLOSSARY.md) and [local evidence decision](docs/adr/0001-local-evidence-before-interpretation.md).
 
-The first implementation covers issue #1 at the agreed public evidence and CLI
-seams. The transcription model and narrated-recording acceptance remain to be evaluated.
+Implementation follows the agreed public evidence and CLI seams. Final model
+selection and narrated-workflow acceptance remain to be evaluated.
 
 ## Development
 
@@ -103,6 +170,8 @@ uv run ruff check .
 uv run ruff format --check .
 uv run ty check
 uv run pytest
+# Opt-in real inference on generated speech; requires the downloaded small model:
+VIDEO_CONTEXT_REAL_MODEL=small uv run --extra asr pytest tests/test_real_model.py
 ```
 
 Tests under `tests/` use real FFmpeg-generated color/timing fixtures and the

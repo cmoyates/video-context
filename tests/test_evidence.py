@@ -1,6 +1,7 @@
 import hashlib
 import json
 import shutil
+import struct
 import subprocess
 from pathlib import Path
 
@@ -30,6 +31,18 @@ def silent_clip(tmp_path: Path) -> Path:
     return source
 
 
+def test_scaled_display_matrix_is_rejected(silent_clip: Path, tmp_path: Path) -> None:
+    # Independent MP4 tkhd fixture: version-0 matrix starts 44 bytes after atom type.
+    data = bytearray(silent_clip.read_bytes())
+    matrix = data.index(b"tkhd") + 44
+    assert struct.unpack_from(">9i", data, matrix) == (65536, 0, 0, 0, 65536, 0, 0, 0, 1073741824)
+    struct.pack_into(">i", data, matrix, 131072)
+    scaled = tmp_path / "scaled.mp4"
+    scaled.write_bytes(data)
+    with pytest.raises(ValueError, match="display matrix"):
+        RecordingEvidence(tmp_path / "store").prepare(scaled)
+
+
 def test_preparation_describes_sparse_visual_evidence(silent_clip: Path, tmp_path: Path) -> None:
     original = silent_clip.read_bytes()
     recording = RecordingEvidence(tmp_path / "store").prepare(silent_clip)
@@ -48,7 +61,7 @@ def test_preparation_describes_sparse_visual_evidence(silent_clip: Path, tmp_pat
     ]:
         assert Path(path).is_absolute() and Path(path).is_file()
     manifest = json.loads(Path(recording.manifest).read_text())
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert manifest["status"] == "complete"
     assert silent_clip.read_bytes() == original
 
@@ -74,7 +87,7 @@ def test_modified_source_cannot_be_used_as_old_evidence(silent_clip: Path, tmp_p
     )
     silent_clip.write_bytes(replacement.read_bytes())
     with pytest.raises(ValueError, match="Source changed"):
-        evidence.inspect(recording.recording_id, at=0)
+        evidence.inspect(recording.recording_id, at=0.8)
 
 
 @pytest.mark.parametrize("change", [{"status": "partial"}, {"schema_version": 42}, {"frames": []}])
@@ -104,17 +117,19 @@ def test_end_of_recording_has_no_frame_at_or_after(silent_clip: Path, tmp_path: 
 
 
 @pytest.mark.parametrize(
-    "filter_graph",
+    "filter_graph, dimensions, duration",
     [
-        "setpts=PTS+1/TB",
-        "setpts=PTS+gte(N\\,10)*0.3/TB",
-        "setsar=2/1",
+        ("setpts=PTS+1/TB", (160, 90), 2.0),
+        ("setpts=PTS+gte(N\\,10)*0.3/TB", (160, 90), 2.3),
+        ("setsar=2/1", (320, 90), 2.0),
     ],
 )
-def test_unsupported_media_is_not_published(
+def test_offset_variable_timing_and_pixel_aspect_are_supported(
     silent_clip: Path,
     tmp_path: Path,
     filter_graph: str,
+    dimensions: tuple[int, int],
+    duration: float,
 ) -> None:
     unsupported = tmp_path / "unsupported.mov"
     subprocess.run(
@@ -135,14 +150,13 @@ def test_unsupported_media_is_not_published(
         check=True,
     )
     evidence = RecordingEvidence(tmp_path / "store")
-    with pytest.raises(ValueError, match="Unsupported"):
-        evidence.prepare(unsupported)
-    recording_id = hashlib.sha256(unsupported.read_bytes()).hexdigest()
-    with pytest.raises(ValueError, match="not prepared"):
-        evidence.inspect(recording_id, 0)
+    recording = evidence.prepare(unsupported)
+    assert (recording.width, recording.height) == dimensions
+    assert recording.duration == duration
+    assert evidence.inspect(recording.recording_id, 0).actual_time == 0
 
 
-def test_rotated_video_is_rejected(silent_clip: Path, tmp_path: Path) -> None:
+def test_rotated_video_reports_upright_dimensions(silent_clip: Path, tmp_path: Path) -> None:
     rotated = tmp_path / "rotated.mov"
     subprocess.run(
         [
@@ -159,8 +173,8 @@ def test_rotated_video_is_rejected(silent_clip: Path, tmp_path: Path) -> None:
         ],
         check=True,
     )
-    with pytest.raises(ValueError, match="Unsupported display"):
-        RecordingEvidence(tmp_path / "store").prepare(rotated)
+    recording = RecordingEvidence(tmp_path / "store").prepare(rotated)
+    assert (recording.width, recording.height) == (90, 160)
 
 
 def test_audio_presence_is_not_mislabeled_as_silence(silent_clip: Path, tmp_path: Path) -> None:
@@ -184,8 +198,8 @@ def test_audio_presence_is_not_mislabeled_as_silence(silent_clip: Path, tmp_path
         ],
         check=True,
     )
-    recording = RecordingEvidence(tmp_path / "store").prepare(narrated)
-    assert recording.audio_status == "not_processed"
+    recording = RecordingEvidence(tmp_path / "store").prepare(narrated, visual_only=True)
+    assert recording.audio_status == "skipped"
     assert recording.visual_status == "ready"
 
 

@@ -1,0 +1,157 @@
+{
+  "issue": 5,
+  "status": "implementation_complete_human_acceptance_pending",
+  "default_model": "turbo",
+  "selection": "Both preserved the meaningful negation and named controls in this sample. Turbo retained an alternative explanation omitted by small, recovered a plausible domain name, and agreed with visible status text. Prefer this fidelity at the measured 2.45 second and memory cost; human natural-speech reference transcription is unavailable.",
+  "comparison": {
+    "excerpt_start_seconds": 138,
+    "excerpt_end_seconds": 258,
+    "duration_seconds": 120,
+    "same_normalized_pcm_for_both": true,
+    "language": "en",
+    "models": [
+      {
+        "model": "small",
+        "startup_import_seconds": 0.1411426670383662,
+        "model_load_and_inference_seconds": 4.938393332995474,
+        "total_seconds": 5.0795360000338405,
+        "process_peak_rss_bytes": 644055040,
+        "mlx_peak_bytes": 1507160898,
+        "segments": 19,
+        "download_bytes": 481307858,
+        "download_seconds": 14.041178874962498,
+        "revision": "45f3915923c7a79a5a5b5a7d909d39aeb0e5630e"
+      },
+      {
+        "model": "turbo",
+        "startup_import_seconds": 0.06465470802504569,
+        "model_load_and_inference_seconds": 7.4684930829680525,
+        "total_seconds": 7.533147790993098,
+        "process_peak_rss_bytes": 1847885824,
+        "mlx_peak_bytes": 2562002834,
+        "segments": 27,
+        "download_bytes": 1613977880,
+        "download_seconds": 34.06157654203707,
+        "revision": "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"
+      }
+    ],
+    "timing_scope": "Separate fresh processes, cached model weights, import startup plus model loading/inference. First download timings exclude Python/FFmpeg setup. No repeat-run distribution or forced filesystem-cache eviction."
+  },
+  "workflow": {
+    "caller_cwd": "SpeechCatcher checkout; additional checks from /tmp",
+    "recording_duration_seconds": 259.8667708333333,
+    "generation": "3a3122f852c7424794056f7072426b83",
+    "commands": [
+      {
+        "label": "prepared",
+        "seconds": 51.776821208011825,
+        "returncode": 0
+      },
+      {
+        "label": "cached",
+        "seconds": 0.24797137500718236,
+        "returncode": 0
+      },
+      {
+        "label": "search-restore",
+        "seconds": 0.1651513340184465,
+        "returncode": 0
+      },
+      {
+        "label": "search-not",
+        "seconds": 0.16181345900986344,
+        "returncode": 0
+      },
+      {
+        "label": "search-font-awesome",
+        "seconds": 0.16241766599705443,
+        "returncode": 0
+      },
+      {
+        "label": "search-syncing",
+        "seconds": 0.15998895798111334,
+        "returncode": 0
+      },
+      {
+        "label": "email",
+        "seconds": 2.5573360419948585,
+        "returncode": 0
+      },
+      {
+        "label": "purchases",
+        "seconds": 2.9232375000137836,
+        "returncode": 0
+      },
+      {
+        "label": "status",
+        "seconds": 3.562998667010106,
+        "returncode": 0
+      },
+      {
+        "label": "alignment",
+        "seconds": 2.5008319999906234,
+        "returncode": 0
+      },
+      {
+        "label": "dense",
+        "seconds": 2.5180780829978175,
+        "returncode": 0
+      },
+      {
+        "label": "crop",
+        "seconds": 2.727101665979717,
+        "returncode": 0
+      },
+      {
+        "label": "offline",
+        "seconds": 1.352720999973826,
+        "returncode": 0
+      },
+      {
+        "label": "alignment-early",
+        "seconds": 2.062356458976865,
+        "returncode": 0
+      },
+      {
+        "label": "profile-crop",
+        "seconds": 2.49125175003428,
+        "returncode": 0
+      },
+      {
+        "label": "status-crop",
+        "seconds": 3.09048387495568,
+        "returncode": 0
+      }
+    ],
+    "derived_store_bytes": 64460644,
+    "trace": "Private work/verification/issue-5/run.json; command/output trace, not a screen recording of Codex",
+    "private_report": "Private work/verification/issue-5/report.md"
+  },
+  "evidence": {
+    "installed_cli": "prepare/search-unavailable-for-silent/inspect passes from unrelated cwd; real narrated prepare/search/inspect also passed from SpeechCatcher cwd",
+    "synthetic_real_model": "Known delayed negation phrase passed separately on small and turbo. This verifies integration and useful surrounding timestamps, not natural-speech accuracy.",
+    "silent_application": "Original Argent capture reused; no_audio; request 25.15s -> actual 25.1666666667s; f000755. See issue-1.json for capture provenance.",
+    "natural_visuals": "Agent inspected full-resolution controls, cursor, status crop and sparse overview. Source hashes rechecked; originals unchanged.",
+    "human_reviewed": false
+  },
+  "unverified": [
+    "Independent human-annotated natural requests and full transcript accuracy",
+    "New-chat Codex skill auto-discovery after restart; installed link and manual skill workflow verified",
+    "No confirmed app-playback segment; speaker separation not implemented",
+    "No independently annotated brief natural event or silence interval; synthetic brief-event coverage is deterministic",
+    "Natural speech timestamps are estimates; no human onset reference available"
+  ],
+  "review": {
+    "standards": "No remaining actionable findings after stale reinstall and display matrix validation fixes. No speculative framework added.",
+    "spec": "Issues 2-4 implemented and verified; issue 5 implementation complete but human-reviewed natural acceptance remains open."
+  },
+  "privacy": "Private original media, transcript wording, screenshots, and report excluded from git.",
+  "validation": {
+    "deterministic_and_installed_cli": "68 passed, 1 opt-in real-model test skipped in 12.15 seconds",
+    "real_model": "small and turbo separately passed the known delayed negation fixture",
+    "quality": "Ruff check, format, ty and git diff whitespace checks passed; skill quick_validate passed",
+    "visual_only_install": "Passed under macOS /bin/bash 3.2 in isolated tool/skill directories; installed CLI fixture passed and cached natural transcript search succeeded without MLX installed",
+    "first_red": "Installed CLI FileNotFoundError from unrelated cwd, saved locally. Subsequent installed test passed.",
+    "additional_regressions": "Scaled display matrix rejected after observed failing test; installer now refreshes same-version wheels and supports empty extras on macOS Bash."
+  }
+}

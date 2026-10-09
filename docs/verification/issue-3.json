@@ -1,0 +1,25 @@
+{
+  "issue": 3,
+  "first_red": "Delayed-speech public-interface test could not import the transcription boundary; RecordingEvidence did not accept a transcriber or provide search.",
+  "deterministic_evidence": [
+    "A one-second delayed tone reaches the external ASR seam as 16 kHz mono PCM preceded by exactly one second of silence.",
+    "A 50 ms gap inserted into AAC packet timestamps remains 800 silent normalized samples.",
+    "Literal case-insensitive search preserves wording, recording order, and bounded continuation.",
+    "Inspection includes segments beginning before its interval.",
+    "Invalid word intervals fail instead of becoming precise evidence.",
+    "Selected audio stream and normalization provenance are retained.",
+    "Recognition failure and missing local models return partial visual evidence with nonzero CLI status."
+  ],
+  "real_model": {
+    "backend": "mlx-whisper 0.4.3",
+    "model": "mlx-community/whisper-small-mlx",
+    "revision": "45f3915923c7a79a5a5b5a7d909d39aeb0e5630e",
+    "generated_fixture": "macOS Samantha: Do not hide the blue button. Open the settings page. Audio starts at recording time 2 s; red visual state spans 2–9 s.",
+    "result": "Negation and requested controls recognized; inspection surrounding the returned speech interval includes the red visual state.",
+    "timing_limit": "Without word timing, the first segment started at 0 s. With word timing, its estimated start was 1.56 s, 0.44 s before the known audio onset. Word times are labelled estimates; the workflow inspects surrounding frames.",
+    "full_natural_recording": {"duration_seconds": 259.8667708333333, "segments": 41, "prepare_seconds": 23.82942937500775, "peak_process_rss_bytes": 963608576, "peak_mlx_bytes": 1547268930},
+    "setup": {"model_bytes": 481307858, "download_seconds": 14.041178874962498},
+    "provisional": true
+  },
+  "limits": "Natural narration has no independently human-verified transcript. These results prove local inference and retrieval, not general speech accuracy or narrator identity. Small versus turbo selection belongs to issue 5. Private media and transcripts are not committed."
+}

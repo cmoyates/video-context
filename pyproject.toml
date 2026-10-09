@@ -11,6 +11,11 @@ dependencies = [
 [project.scripts]
 video-context = "video_context.cli:main"
 
+[project.optional-dependencies]
+asr = [
+    "mlx-whisper==0.4.3",
+]
+
 [build-system]
 requires = ["uv_build>=0.10.9,<0.11"]
 build-backend = "uv_build"
@@ -55,6 +60,7 @@ addopts = [
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
+  "real_model: opt-in acceptance using an explicitly downloaded local speech model",
   "unit: fast isolated tests",
   "integration: tests that touch filesystem, database, subprocesses, or external services",
   "slow: tests that are useful but too slow for every edit loop",

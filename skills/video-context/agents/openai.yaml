@@ -1,0 +1,6 @@
+interface:
+  display_name: "Video Context"
+  short_description: "Understand narrated recordings with local evidence"
+  default_prompt: "Use $video-context to inspect this recording and report evidence-linked requests, observations, and uncertainties."
+policy:
+  allow_implicit_invocation: true
