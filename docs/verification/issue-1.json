@@ -1,0 +1,80 @@
+{
+  "issue": 1,
+  "date": "2026-10-09",
+  "tdd": {
+    "first_red": "tests/test_cli.py: FileNotFoundError for the absent installed video-context CLI",
+    "first_green": "1 passed; requested 1.15 seconds returned the independently generated red frame at 1.2 seconds; original bytes unchanged",
+    "final_suite": "26 passed",
+    "seams": [
+      "RecordingEvidence.prepare / inspect",
+      "installed CLI across two processes"
+    ]
+  },
+  "checks": [
+    "uv run ruff check .: passed",
+    "uv run ruff format --check .: passed",
+    "uv run ty check: passed",
+    "uv run pytest -q: 26 passed",
+    "uv build: sdist and wheel built",
+    "Wheel installed in an isolated venv; prepare and inspect executed from /tmp against the real capture: passed"
+  ],
+  "recording": {
+    "artifact": "work/verification/issue-1/speechcatcher-original.mp4",
+    "sha256": "896cc6a266177e33d54e9ae04ac593fe5d406773615cb9e8efe185827bf6be20",
+    "duration_seconds": 29.866666666666667,
+    "width": 1640,
+    "height": 2360,
+    "audio_status": "no_audio",
+    "codec": "H.264",
+    "frames": 896,
+    "frame_rate": "30/1",
+    "time_base": "1/15360",
+    "start_pts": 0,
+    "capture": "Argent 0.25.2 screen-recording-start/stop; trimStatic=false; showTouches=true; original retained without transcoding",
+    "reported_capture_duration_ms": 29904
+  },
+  "target": {
+    "simulator": "Yvan iPad 26.5",
+    "udid": "FA731F00-2BFE-428C-B680-56C09CD3F106",
+    "os": "iOS 26.5",
+    "bundle_id": "ca.speechmetrics.speechcatcher.dev",
+    "native_version": "1.1.0",
+    "native_build": "1",
+    "speechcatcher_checkout": "c52baf7313e2b032a6487109b53f78e665dbf64a",
+    "branch": "feat/1858-concise-highlight-flags",
+    "metro": "bun run dev-dev, port 8081, apps/mobile",
+    "preexisting_changes": [
+      "verification skill",
+      "Test Builder CSV parser and tests"
+    ],
+    "source_changes_for_capture": []
+  },
+  "actions": [
+    "Start on Tests with synthetic E2E fixtures",
+    "Open Fronting subtype QA",
+    "Open the fixture image preview (blank gray image)",
+    "Dismiss preview",
+    "Return to Tests",
+    "Open Highlights flags QA"
+  ],
+  "data": "Synthetic E2E tests only; no Client selected, no clinical assessment performed.",
+  "inspection": {
+    "command": "video-context inspect RECORDING_ID --at 25.15 --store STORE",
+    "requested_seconds": 25.15,
+    "actual_seconds": 25.166666666666668,
+    "observed": "Highlights flags QA setup screen, matching the capture"
+  },
+  "review": {
+    "base": "9441b37f6b71520a257c8e6c2d0a1e909448608c",
+    "standards": "No remaining actionable findings; reviewed Python anti-slop guidance and documented repository rules. Shared parsed video metadata replaces repeated parsing.",
+    "spec": "Issue 1 acceptance implemented; overview and retrieved frame visually inspected. Original video fully decoded by ffprobe. Timing assertions use a separate synthetic color fixture."
+  },
+  "limits": [
+    "Only one zero-origin continuous CFR progressive square-pixel video stream is supported; unsupported timing/display rejected pending issue 2.",
+    "Audio presence is detected but not transcribed; no model download.",
+    "Silent simulator media does not verify speech recognition, physical devices, or production behavior.",
+    "Artifacts are local under ignored work/; media attached separately to PR.",
+    "Preparation decodes all frame metadata and overview extraction repeats decoding; long-recording performance is unmeasured.",
+    "Full stage repair, concurrency, and cache cleanup are deferred to issue 4."
+  ]
+}
