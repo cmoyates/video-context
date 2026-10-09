@@ -1,0 +1,6 @@
+# Planned vocabulary format: UTF-8, one preferred term per line.
+# Copy this file to vocabulary.local.txt and replace these examples.
+# Blank lines and lines beginning with # are reserved for readability.
+# Placeholder only: the CLI does not read vocabulary files yet.
+Example Product
+Example UI Library

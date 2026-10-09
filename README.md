@@ -16,6 +16,17 @@ is needed or downloaded for silent recordings or explicit visual-only preparatio
 
 ## Prepare and inspect
 
+### Vocabulary placeholder
+
+[`vocabulary.example.txt`](vocabulary.example.txt) is a public template for project
+terminology. Copy it to `vocabulary.local.txt`, which is gitignored, and add one
+preferred term per line. Keep project-specific terms in the local file.
+This is a placeholder: the CLI does not consume these files yet. Whole-recording
+vocabulary support requires carrying recognition hints across decoding windows;
+it will not perform automatic text replacements.
+
+### Installation and usage
+
 For use from any repository, install the CLI and Codex skill once:
 
 ```bash
