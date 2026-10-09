@@ -19,6 +19,12 @@ in this skill's [setup reference](references/setup.md).
    generation, immutable `generation_manifest`, stage status, and artifact paths.
    Use `--visual-only` only when visual evidence alone serves the task. A failed
    speech stage can still return usable visual evidence with nonzero exit status.
+   When the user supplies a project vocabulary, add `--vocabulary '/absolute/terms.txt'`.
+   It contains one preferred term per line, with blank lines and `#` comments ignored.
+   Keep the list focused; an oversized vocabulary is an explicit error. Terms guide
+   every speech window but are not proof that those words were spoken. Exact terms
+   appear in the private manifest. There is no automatic vocabulary discovery or
+   transcript substitution. Reuse requires the same effective vocabulary contents.
 3. Read the transcript artifact when available and view the overview image.
    The overview is sparse orientation: it cannot establish that an event never
    occurred. `empty` transcription does not prove silence. If a model is absent,

@@ -16,14 +16,41 @@ is needed or downloaded for silent recordings or explicit visual-only preparatio
 
 ## Prepare and inspect
 
-### Vocabulary placeholder
+### Optional project vocabulary
 
 [`vocabulary.example.txt`](vocabulary.example.txt) is a public template for project
 terminology. Copy it to `vocabulary.local.txt`, which is gitignored, and add one
-preferred term per line. Keep project-specific terms in the local file.
-This is a placeholder: the CLI does not consume these files yet. Whole-recording
-vocabulary support requires carrying recognition hints across decoding windows;
-it will not perform automatic text replacements.
+preferred term per line. Keep project-specific terms in the local file, then pass
+its path explicitly:
+
+```bash
+video-context prepare /absolute/path/recording.mov --vocabulary /absolute/path/vocabulary.local.txt
+```
+
+UTF-8 files support blank lines and full-line `#` comments. Surrounding whitespace
+and exact duplicate terms are ignored; spelling, case, and first-occurrence order
+are retained. A comment-only file is equivalent to no hints. Files are never
+discovered automatically from the working directory. Silent and visual-only
+preparation do not run speech recognition.
+
+Hints apply to every decoding window, including speech after the first 30 seconds.
+They bias recognition; they do not guarantee a spelling or replace transcript
+words afterward. Keep the list focused: the current models allow 223 prompt
+tokens, including separators, and an oversized vocabulary fails explicitly before
+recognition rather than silently dropping terms. Available visual evidence is
+still returned on a speech-stage failure.
+
+The effective terms and prompt setting are saved with transcription provenance.
+Changing terms invalidates the speech cache; editing comments or moving the file
+does not. Treat manifests and transcripts as private too, since they include the
+terms. Old evidence remains readable without the vocabulary file.
+
+The optional ASR dependency uses a small
+[commit-pinned MLX Whisper fork](https://github.com/cmoyates/mlx-examples/blob/24c78c9c3bcdab8d162ec6b56d73643f2f632a79/whisper/VIDEO_CONTEXT_FORK.md)
+of version 0.4.3 (`0.4.3+vc.1`) while upstream prompt-carrying support is pending.
+It preserves default no-hints behavior and rejects oversized carried prompts.
+The fork documents tests and the route back to an upstream release. Git is needed
+to install this dependency; visual-only installation does not install it.
 
 ### Installation and usage
 

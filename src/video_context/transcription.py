@@ -8,7 +8,7 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import Literal, Protocol
 
-from ._json import boolean, integer, number, object_, objects, text
+from ._json import boolean, integer, number, object_, objects, strings, text
 
 MODELS = {
     "small": ("mlx-community/whisper-small-mlx", "45f3915923c7a79a5a5b5a7d909d39aeb0e5630e"),
@@ -16,6 +16,15 @@ MODELS = {
 }
 
 type SourceStatus = Literal["available", "unavailable", "changed"]
+
+
+def load_vocabulary(path: Path) -> tuple[str, ...]:
+    """Read preferred terms; full-line comments and blank lines are not hints."""
+    return tuple(
+        line.strip()
+        for line in path.expanduser().read_text(encoding="utf-8-sig").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
 
 
 def model_path(name: str, *, download: bool = False) -> Path:
@@ -61,6 +70,8 @@ class TranscriptionConfig:
     runtime_version: str = ""
     fp16: bool = True
     task: str = "transcribe"
+    vocabulary: tuple[str, ...] = ()
+    carry_initial_prompt: bool = False
 
 
 class Transcriber(Protocol):
@@ -72,13 +83,21 @@ class Transcriber(Protocol):
 
 class MLXWhisper:
     def __init__(
-        self, model: str = "turbo", *, language: str | None = None, word_timestamps: bool = True
+        self,
+        model: str = "turbo",
+        *,
+        language: str | None = None,
+        word_timestamps: bool = True,
+        vocabulary: tuple[str, ...] = (),
     ) -> None:
         if model not in MODELS:
             raise ValueError("Model must be small or turbo")
         self.model = model
         self.language = language
         self.word_timestamps = word_timestamps
+        self.vocabulary = tuple(dict.fromkeys(term.strip() for term in vocabulary if term.strip()))
+        if any(any(char in term for char in "\r\n\0") for term in self.vocabulary):
+            raise ValueError("Vocabulary terms must be single lines without NUL characters")
 
     @property
     def configuration(self) -> TranscriptionConfig:
@@ -91,6 +110,8 @@ class MLXWhisper:
             self.language,
             self.word_timestamps,
             runtime_version=version("mlx"),
+            vocabulary=self.vocabulary,
+            carry_initial_prompt=bool(self.vocabulary),
         )
 
     def transcribe(self, audio: Path) -> object:
@@ -110,6 +131,8 @@ class MLXWhisper:
                     verbose=None,
                     task=configuration.task,
                     fp16=configuration.fp16,
+                    initial_prompt=", ".join(configuration.vocabulary) or None,
+                    carry_initial_prompt=configuration.carry_initial_prompt,
                 )
             )
         result["local_model_path"] = str(path)
@@ -232,6 +255,8 @@ def read_transcript(value: object, duration: float) -> Transcript:
         text(config["runtime_version"]),
         boolean(config["fp16"]),
         text(config["task"]),
+        tuple(strings(config.get("vocabulary", []))),
+        boolean(config.get("carry_initial_prompt", False)),
     )
     normal = object_(data["normalization"])
     normalization = Normalization(

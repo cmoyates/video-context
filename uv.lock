@@ -593,8 +593,8 @@ wheels = [
 
 [[package]]
 name = "mlx-whisper"
-version = "0.4.3"
-source = { registry = "https://pypi.org/simple" }
+version = "0.4.3+vc.1"
+source = { git = "https://github.com/cmoyates/mlx-examples.git?subdirectory=whisper&rev=24c78c9c3bcdab8d162ec6b56d73643f2f632a79#24c78c9c3bcdab8d162ec6b56d73643f2f632a79" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "mlx" },
@@ -605,9 +605,6 @@ dependencies = [
     { name = "tiktoken" },
     { name = "torch" },
     { name = "tqdm" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/b7/a35232812a2ccfffcb7614ba96a91338551a660a0e9815cee668bf5743f0/mlx_whisper-0.4.3-py3-none-any.whl", hash = "sha256:6b82b6597a994643a3e5496c7bc229a672e5ca308458455bfe276e76ae024489", size = 890544, upload-time = "2025-08-29T14:56:13.815Z" },
 ]
 
 [[package]]
@@ -1487,7 +1484,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mlx-whisper", marker = "extra == 'asr'", specifier = "==0.4.3" },
+    { name = "mlx-whisper", marker = "extra == 'asr'", git = "https://github.com/cmoyates/mlx-examples.git?subdirectory=whisper&rev=24c78c9c3bcdab8d162ec6b56d73643f2f632a79" },
     { name = "pillow", specifier = ">=12.3.0" },
 ]
 provides-extras = ["asr"]
