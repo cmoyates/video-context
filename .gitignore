@@ -23,3 +23,6 @@ input/
 output/
 work/
 .firecrawl/
+
+# Private project terminology; keep the example public.
+/vocabulary.local.txt
