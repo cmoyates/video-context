@@ -37,6 +37,17 @@ Repository: [cmoyates/video-context](https://github.com/cmoyates/video-context).
   MCP and local OCR are optional later additions.
 - SpeechCatcher is the first use case; keep this tool independent of its repository.
 
+## Design
+
+- [Implementation proposal and self-grill](docs/design/video-context-v1.md):
+  scope, interfaces, timing/cache contracts, and proposed TDD seams.
+- [Implementation research](docs/research/2026-10-09-video-context.md):
+  existing tools, pinned source references, and local timing experiments.
+- [Glossary](GLOSSARY.md) and [local evidence decision](docs/adr/0001-local-evidence-before-interpretation.md).
+
+The proposal is not implemented. The transcription model and real-recording
+acceptance remain to be evaluated; test seams must be confirmed before TDD begins.
+
 ## Development
 
 The Python 3.12 baseline is retained from the template. Development dependencies
@@ -80,9 +91,11 @@ the template. Local recordings and derived artifacts belong in the gitignored
 
 Pre-wired for **Claude Code** (`.claude/`) and **OpenAI Codex CLI** (`.codex/`). Hooks run Ruff format, lint-fix, and import-sort automatically after the agent edits files, so AI-generated code matches the same standards as save-on-format. A stop hook also runs Ruff, `ty`, and `pytest` over the whole project before the agent finishes — blocking on type errors or failing tests.
 
-Skills live in both `.agents/` and `.claude/` (Claude Code doesn't inherit from `.agents/`), preloaded with:
+Skills live in `.agents/skills/`. Matt Pocock's skills are also exposed to Claude
+Code through relative symlinks in `.claude/skills/`, so both agents use the same
+files. Preloaded with:
 
-- **[Matt Pocock's skills](https://github.com/mattpocock/skills)** (snapshot: 2026-05-02) — TDD, diagnose, grill-me, triage, and more. After cloning and renaming the repo, run the `setup-matt-pocock-skills` skill if you plan to use them.
+- **[Matt Pocock's skills](https://github.com/mattpocock/skills)** — all 27 published engineering and productivity skills, including TDD, diagnosing-bugs, code-review, implement, to-spec, to-tickets, grill-me, and triage. Updated on 2026-10-09 from [commit `49dd158`](https://github.com/mattpocock/skills/commit/49dd158d1076134a641b33efb035946536778336). Experimental and miscellaneous skills are excluded, matching the upstream plugin manifest. Project setup is complete: [AGENTS.md](AGENTS.md) points to the GitHub issue tracker, default triage labels, and single-context domain documentation conventions in [docs/agents](docs/agents/).
 - **[btca-local](https://github.com/davis7dotsh/better-context/blob/main/skills/btca-local/SKILL.md)** — "Better Context App Local". Triggered with `use btca`, it lets the agent search any git repo locally by cloning (or updating) it under `~/.btca/agent/sandbox` and answering questions against the source with citations and code snippets.
 
 ## Configuration
