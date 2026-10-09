@@ -247,6 +247,7 @@ Skills live in `.agents/skills/`. Matt Pocock's skills are also exposed to Claud
 Code through relative symlinks in `.claude/skills/`, so both agents use the same
 files. Preloaded with:
 
+- **[Python anti-slop](.agents/skills/python-anti-slop/SKILL.md)** — a locally maintained Python adaptation inspired by [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop). Invoke `$python-anti-slop` for evidence-led reviews, cleanup, or additive Ruff/type-check policy setup. Includes researched Python-specific rules, configuration templates, and a [source and upstream mapping](.agents/skills/python-anti-slop/references/sources.md). Its Ruff and ty templates are enabled in this project's `pyproject.toml`.
 - **[Matt Pocock's skills](https://github.com/mattpocock/skills)** — all 27 published engineering and productivity skills, including TDD, diagnosing-bugs, code-review, implement, to-spec, to-tickets, grill-me, and triage. Updated on 2026-10-09 from [commit `49dd158`](https://github.com/mattpocock/skills/commit/49dd158d1076134a641b33efb035946536778336). Experimental and miscellaneous skills are excluded, matching the upstream plugin manifest. Project setup is complete: [AGENTS.md](AGENTS.md) points to the GitHub issue tracker, default triage labels, and single-context domain documentation conventions in [docs/agents](docs/agents/).
 - **[btca-local](https://github.com/davis7dotsh/better-context/blob/main/skills/btca-local/SKILL.md)** — "Better Context App Local". Triggered with `use btca`, it lets the agent search any git repo locally by cloning (or updating) it under `~/.btca/agent/sandbox` and answering questions against the source with citations and code snippets.
 
@@ -256,5 +257,9 @@ Lint/format rules live in `pyproject.toml` under `[tool.ruff]`. Defaults:
 
 - Line length: 100
 - Target: Python 3.12+
-- Lint rules: pycodestyle, Pyflakes, isort, pyupgrade, bugbear, simplify
+- Lint rules: pycodestyle, Pyflakes, isort, pyupgrade, bugbear, simplify, plus the
+  Python anti-slop template's explicit annotation, collection, exception, and
+  suppression checks
+- Type policy: missing generic arguments, unsound returns, redundant casts, and
+  unused/blanket ty ignores are errors
 - Quote style: double

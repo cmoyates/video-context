@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Anti-Slop"
+  short_description: "Evidence-led Python review and lint policy setup"
+  default_prompt: "Use $python-anti-slop to review the current Python diff and report evidence-backed findings."

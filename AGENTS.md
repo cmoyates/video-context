@@ -5,6 +5,12 @@ Codex is the primary agent. Skills are maintained in `.agents/skills/`;
 
 ## Agent skills
 
+### Python anti-slop
+
+For Python anti-slop reviews, cleanup, or lint-policy installation and updates,
+read `.agents/skills/python-anti-slop/SKILL.md`. Its references distinguish
+mechanical checks from judgments that need code and caller evidence.
+
 ### Issue tracker
 
 Use GitHub Issues in `cmoyates/video-context`. Before creating, updating, or
