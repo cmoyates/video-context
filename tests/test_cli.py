@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -143,3 +144,54 @@ def test_input_failures_have_diagnostics(tmp_path: Path, kind: str) -> None:
     assert result.stdout == ""
     assert "Traceback" not in result.stderr
     assert result.stderr.strip()
+
+
+def test_cli_reports_unavailable_transcript_without_a_traceback(tmp_path: Path) -> None:
+    cli = Path(sys.executable).parent / "video-context"
+    result = subprocess.run(
+        [str(cli), "search", "a" * 64, "hello", "--store", str(tmp_path)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert "not prepared" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_missing_local_model_returns_partial_visual_result_and_explicit_setup(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "needs-model.mov"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=16x16:r=1:d=2",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=duration=2",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "pcm_s16le",
+            str(source),
+        ],
+        check=True,
+    )
+    cli = Path(sys.executable).parent / "video-context"
+    env = {**os.environ, "HF_HUB_CACHE": str(tmp_path / "empty-model-cache"), "HF_HUB_OFFLINE": "1"}
+    result = subprocess.run(
+        [str(cli), "prepare", str(source), "--store", str(tmp_path / "store")],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 1
+    recording = json.loads(result.stdout)
+    assert recording["visual_status"] == "ready" and recording["audio_status"] == "failed"
+    assert "models fetch small" in result.stderr or "Install video-context[asr]" in result.stderr

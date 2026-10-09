@@ -5,13 +5,28 @@ import json
 import math
 import re
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from fractions import Fraction
 from pathlib import Path
 from typing import Literal, overload
 from uuid import uuid4
 
 from PIL import Image, ImageDraw
+
+from ._json import integer as _integer
+from ._json import object_ as _object
+from ._json import objects as _objects
+from ._json import text as _text
+from .transcription import (
+    MLXWhisper,
+    Normalization,
+    SearchResult,
+    Segment,
+    Transcriber,
+    Transcript,
+    recognize,
+    segments,
+)
 
 type Crop = tuple[int, int, int, int]
 
@@ -24,9 +39,19 @@ class PreparedRecording:
     duration: float
     width: int
     height: int
-    audio_status: Literal["no_audio", "not_processed"]
+    audio_status: Literal["no_audio", "skipped", "ready", "empty", "failed"]
     visual_status: Literal["ready"]
     overview: Overview
+    transcript: Transcript | None = None
+    audio_error: str | None = None
+
+
+class PreparationFailed(ValueError):
+    def __init__(self, recording: PreparedRecording) -> None:
+        self.recording = recording
+        super().__init__(
+            f"Transcription failed; visual evidence available: {recording.audio_error}"
+        )
 
 
 @dataclass(frozen=True)
@@ -35,6 +60,7 @@ class Frame:
     actual_time: float
     path: str
     status: Literal["ready"] = "ready"
+    segments: list[Segment] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -43,6 +69,7 @@ class NoFrame:
     actual_time: None = None
     path: None = None
     status: Literal["no_frame"] = "no_frame"
+    segments: list[Segment] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -61,6 +88,7 @@ class Inspection:
     sampling_interval: float | None
     width: int
     height: int
+    segments: list[Segment] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -132,30 +160,6 @@ def _digest(source: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def _object(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        raise ValueError("Expected a JSON object")
-    return dict(value)
-
-
-def _objects(value: object) -> list[dict[str, object]]:
-    if not isinstance(value, list):
-        raise ValueError("Expected a JSON array")
-    return [_object(item) for item in value]
-
-
-def _text(value: object) -> str:
-    if not isinstance(value, str):
-        raise ValueError("Expected text")
-    return value
-
-
-def _integer(value: object) -> int:
-    if type(value) is not int:
-        raise ValueError("Expected an integer")
-    return value
-
-
 def _parse_video(data: dict[str, object]) -> _Video:
     streams = _objects(data["streams"])
     if len(streams) != 1:
@@ -224,13 +228,86 @@ def _parse_video(data: dict[str, object]) -> _Video:
     return _Video(width, height, duration, time_base, pts, origin)
 
 
+def _normalize_audio(
+    source: Path, stream: dict[str, object], video: _Video, audio: Path
+) -> Normalization:
+    index = _integer(stream["index"])
+    base = Fraction(_text(stream["time_base"]))
+    rate = int(_text(stream["sample_rate"]))
+    probe = _object(
+        json.loads(
+            _run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    str(index),
+                    "-show_frames",
+                    "-show_entries",
+                    "frame=pts,nb_samples",
+                    "-of",
+                    "json",
+                    str(source),
+                ]
+            )
+        )
+    )
+    frames = _objects(probe["frames"])
+    if not frames or base <= 0 or rate <= 0:
+        raise ValueError("Unsupported audio timeline: missing samples or time base")
+    previous_end = video.origin
+    for frame in frames:
+        start = _integer(frame["pts"]) * base
+        count = _integer(frame["nb_samples"])
+        if count <= 0 or start < previous_end - Fraction(1, rate):
+            raise ValueError(
+                "Unsupported audio timeline: overlapping or reversed sample timestamps"
+            )
+        previous_end = start + Fraction(count, rate)
+    filters = (
+        f"asetpts=PTS-({video.origin})/TB,aresample=16000:async=1:first_pts=0:"
+        "min_comp=0.0000625:min_hard_comp=0.0000625,"
+        f"apad=whole_dur={float(video.duration)},atrim=end={float(video.duration)}"
+    )
+    _run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-nostdin",
+            "-copyts",
+            "-i",
+            str(source),
+            "-map",
+            f"0:{index}",
+            "-vn",
+            "-af",
+            filters,
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-c:a",
+            "pcm_s16le",
+            str(audio),
+        ]
+    )
+    return Normalization(
+        index, _integer(stream["start_pts"]), str(base), str(video.origin), filters
+    )
+
+
 class RecordingEvidence:
     """Own preparation and frame retrieval for a local evidence store."""
 
-    def __init__(self, store: Path) -> None:
+    def __init__(self, store: Path, *, transcriber: Transcriber | None = None) -> None:
         self.store = store.expanduser().resolve()
+        self.transcriber = transcriber if transcriber is not None else MLXWhisper()
 
-    def prepare(self, source: Path) -> PreparedRecording:
+    def prepare(
+        self, source: Path, *, visual_only: bool = False, audio_stream: int | None = None
+    ) -> PreparedRecording:
         source = source.expanduser().resolve()
         recording_id = _digest(source)
         directory = self.store / recording_id / uuid4().hex
@@ -255,8 +332,17 @@ class RecordingEvidence:
         streams = _objects(metadata["streams"])
         if len([s for s in streams if s.get("codec_type") == "video"]) != 1:
             raise ValueError("Unsupported media: expected exactly one video stream")
-        audio_status: Literal["no_audio", "not_processed"] = (
-            "not_processed" if any(s.get("codec_type") == "audio" for s in streams) else "no_audio"
+        audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+        selected_audio = next(
+            (s for s in audio_streams if audio_stream is None or s.get("index") == audio_stream),
+            None,
+        )
+        if audio_stream is not None and selected_audio is None:
+            raise ValueError(
+                "Selected audio stream is unavailable; use an absolute audio stream index"
+            )
+        audio_status: Literal["no_audio", "skipped", "ready", "empty", "failed"] = (
+            "skipped" if any(s.get("codec_type") == "audio" for s in streams) else "no_audio"
         )
         data = _object(
             json.loads(
@@ -315,6 +401,21 @@ class RecordingEvidence:
             draw.text((x + 4, y + cell_height - 22), f"{actual:.6f} s", fill="white")
         overview_path = directory / "overview.png"
         sheet.save(overview_path)
+        transcript = None
+        failure: Exception | None = None
+        if audio_status != "no_audio" and not visual_only:
+            assert selected_audio is not None
+            audio = directory / "audio.wav"
+            try:
+                normalization = _normalize_audio(source, selected_audio, video, audio)
+                transcript = recognize(
+                    self.transcriber, audio, float(video.duration), normalization
+                )
+                audio_status = transcript.status
+            except (OSError, ValueError, RuntimeError, ImportError) as exc:
+                # External recognition boundary: publish usable visuals, then re-raise with context.
+                failure = exc
+                audio_status = "failed"
         result = PreparedRecording(
             recording_id,
             str(source),
@@ -325,15 +426,20 @@ class RecordingEvidence:
             audio_status,
             "ready",
             Overview(str(overview_path), overview_frames),
+            transcript,
+            str(failure) if failure is not None else None,
         )
         data["schema_version"] = 1
         data["status"] = "complete"
         data["recording"] = asdict(result)
+        data["transcript"] = asdict(transcript) if transcript is not None else None
         temporary = directory / "manifest.json"
         temporary.write_text(json.dumps(data))
         if _digest(source) != recording_id:
             raise ValueError("Source changed during preparation; prepare it again")
         temporary.replace(manifest)
+        if failure is not None:
+            raise PreparationFailed(result) from failure
         return result
 
     def _load(self, recording_id: str) -> tuple[dict[str, object], _Video]:
@@ -355,6 +461,27 @@ class RecordingEvidence:
         if _digest(source) != recording_id:
             raise ValueError("Source changed since preparation; prepare it again")
         return data, video
+
+    def search(
+        self, recording_id: str, query: str, *, limit: int = 20, offset: int = 0
+    ) -> SearchResult:
+        if not query or not 1 <= limit <= 100 or offset < 0:
+            raise ValueError("Search requires nonempty text, limit 1–100, and nonnegative offset")
+        data, video = self._load(recording_id)
+        transcript = data.get("transcript")
+        if transcript is None:
+            raise ValueError("Transcript unavailable for this recording")
+        matches = [
+            s
+            for s in segments(_object(transcript)["segments"], float(video.duration))
+            if query.casefold() in s.text.casefold()
+        ]
+        return SearchResult(
+            recording_id,
+            query,
+            matches[offset : offset + limit],
+            offset + limit if offset + limit < len(matches) else None,
+        )
 
     @overload
     def inspect(
@@ -385,6 +512,12 @@ class RecordingEvidence:
         if at is not None and (not math.isfinite(at) or at < 0):
             raise ValueError("Requested time must be finite and nonnegative (seconds)")
         data, video = self._load(recording_id)
+        transcript = data.get("transcript")
+        speech = (
+            []
+            if transcript is None
+            else segments(_object(transcript)["segments"], float(video.duration))
+        )
         if crop is not None:
             x, y, width, height = crop
             if (
@@ -434,7 +567,14 @@ class RecordingEvidence:
             if _digest(source) != recording_id:
                 raise ValueError("Source changed during inspection; prepare it again")
             return Inspection(
-                start, end, frames, source_frames, sampling, video.width, video.height
+                start,
+                end,
+                frames,
+                source_frames,
+                sampling,
+                video.width,
+                video.height,
+                [s for s in speech if s.start < end and s.end > start],
             )
         requested_time = Fraction(str(at))
         selected = next(
@@ -446,9 +586,14 @@ class RecordingEvidence:
             None,
         )
         if selected is None:
-            return NoFrame(at)
+            return NoFrame(at, segments=[s for s in speech if s.start <= at < s.end])
         index, pts = selected
         path = _extract(str(source), [index], directory, video, crop)[index]
         if _digest(source) != recording_id:
             raise ValueError("Source changed during inspection; prepare it again")
-        return Frame(at, float(pts * video.time_base - video.origin), str(path))
+        return Frame(
+            at,
+            float(pts * video.time_base - video.origin),
+            str(path),
+            segments=[s for s in speech if s.start <= at < s.end],
+        )

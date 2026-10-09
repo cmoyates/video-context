@@ -185,8 +185,8 @@ def test_audio_presence_is_not_mislabeled_as_silence(silent_clip: Path, tmp_path
         ],
         check=True,
     )
-    recording = RecordingEvidence(tmp_path / "store").prepare(narrated)
-    assert recording.audio_status == "not_processed"
+    recording = RecordingEvidence(tmp_path / "store").prepare(narrated, visual_only=True)
+    assert recording.audio_status == "skipped"
     assert recording.visual_status == "ready"
 
 

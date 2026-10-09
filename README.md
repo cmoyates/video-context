@@ -10,8 +10,9 @@ and visual evidence that the agent can inspect alongside a codebase.
 
 The visual slices prepare local MOV/MP4 recordings, create a sparse overview,
 and retrieve timestamped frames, intervals, and crops in later CLI processes.
-Transcription and the Codex skill remain planned. No speech model is needed
-or downloaded for visual preparation.
+Local transcription and literal transcript search are available with the optional
+Apple Silicon ASR dependencies. The Codex skill remains planned. No speech model
+is needed or downloaded for silent recordings or explicit visual-only preparation.
 
 ## Prepare and inspect
 
@@ -26,6 +27,28 @@ uv run video-context inspect RECORDING_ID --start 1.1 --end 1.4 --source-frames 
 uv run video-context inspect RECORDING_ID --at 1.2 --crop 10,10,120,60 --store ./work/evidence
 ```
 
+For narrated recordings on Apple Silicon, explicitly install and fetch a pinned
+model once. Preparation itself only uses local model files and never uploads media:
+
+```bash
+uv sync --extra asr --locked
+uv run --extra asr video-context models fetch small
+uv run --extra asr video-context prepare /absolute/path/narrated.mov --model small --language en
+uv run video-context search RECORDING_ID "offline" --limit 10
+```
+
+Omit `--language` for detection. `small` is provisional pending the comparison
+with `turbo`; both model revisions are pinned in the package. `--visual-only`
+skips recognition. `--audio-stream N` selects an absolute source stream index;
+otherwise the first audio stream is used. Audio is normalized to 16 kHz mono
+PCM with delayed starts and timestamp gaps preserved as silence. Normalization,
+model revision, package version, and decoding settings are recorded with evidence.
+
+Search matches literal case-insensitive substrings in recording order. Use the
+returned `next_offset` with `--offset` to continue. Inspection returns all speech
+segments overlapping the requested point or interval. Speech and word times are
+estimates: inspect surrounding moments before interpreting brief gestures.
+
 Both commands write JSON to stdout; failures write diagnostics to stderr and exit
 nonzero. `--at` is a finite, nonnegative recording time in seconds. Inspection
 returns the first decoded frame at or after that time, with `requested_time`,
@@ -36,8 +59,10 @@ Preparation returns a SHA-256 `recording_id`, video duration in seconds, display
 `width`/`height`, stage availability, a manifest path, and an overview. Open the
 overview image for orientation, then inspect individual full-resolution frames.
 The overview labels up to 12 samples spanning first to last frame; it can omit
-events. `audio_status: "no_audio"` keeps silent recordings usable; audio-bearing
-files report `not_processed` and retain visual evidence.
+events. Audio status distinguishes `no_audio`, `skipped`, `ready`, `empty`, and
+`failed`. A recognition failure publishes available visuals, prints the partial
+result as JSON, reports the error on stderr, and exits nonzero. `empty` means
+recognition completed without speech segments, not that the media had no audio.
 
 Intervals are half-open `[start, end)`. Sampling defaults to every 0.5 seconds,
 spreading a maximum of 24 requests across longer intervals. `sampling_interval`
@@ -97,8 +122,8 @@ Repository: [cmoyates/video-context](https://github.com/cmoyates/video-context).
   existing tools, pinned source references, and local timing experiments.
 - [Glossary](GLOSSARY.md) and [local evidence decision](docs/adr/0001-local-evidence-before-interpretation.md).
 
-The first implementation covers issue #1 at the agreed public evidence and CLI
-seams. The transcription model and narrated-recording acceptance remain to be evaluated.
+Implementation follows the agreed public evidence and CLI seams. Final model
+selection and narrated-workflow acceptance remain to be evaluated.
 
 ## Development
 
@@ -112,6 +137,8 @@ uv run ruff check .
 uv run ruff format --check .
 uv run ty check
 uv run pytest
+# Opt-in real inference on generated speech; requires the downloaded small model:
+VIDEO_CONTEXT_REAL_MODEL=small uv run --extra asr pytest tests/test_real_model.py
 ```
 
 Tests under `tests/` use real FFmpeg-generated color/timing fixtures and the
