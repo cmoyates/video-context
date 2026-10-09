@@ -1,6 +1,7 @@
 import hashlib
 import json
 import shutil
+import struct
 import subprocess
 from pathlib import Path
 
@@ -28,6 +29,18 @@ def silent_clip(tmp_path: Path) -> Path:
         check=True,
     )
     return source
+
+
+def test_scaled_display_matrix_is_rejected(silent_clip: Path, tmp_path: Path) -> None:
+    # Independent MP4 tkhd fixture: version-0 matrix starts 44 bytes after atom type.
+    data = bytearray(silent_clip.read_bytes())
+    matrix = data.index(b"tkhd") + 44
+    assert struct.unpack_from(">9i", data, matrix) == (65536, 0, 0, 0, 65536, 0, 0, 0, 1073741824)
+    struct.pack_into(">i", data, matrix, 131072)
+    scaled = tmp_path / "scaled.mp4"
+    scaled.write_bytes(data)
+    with pytest.raises(ValueError, match="display matrix"):
+        RecordingEvidence(tmp_path / "store").prepare(scaled)
 
 
 def test_preparation_describes_sparse_visual_evidence(silent_clip: Path, tmp_path: Path) -> None:

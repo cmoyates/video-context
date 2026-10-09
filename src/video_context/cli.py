@@ -49,7 +49,7 @@ def main() -> None:
     prepare.add_argument(
         "--rebuild", action="store_true", help="Explicitly rebuild cached evidence"
     )
-    prepare.add_argument("--model", choices=MODELS, default="small")
+    prepare.add_argument("--model", choices=MODELS, default="turbo")
     prepare.add_argument("--language", help="Language code; omitted means auto-detection")
     prepare.add_argument(
         "--overview-frames", type=int, default=12, help="Sparse overview budget (1–12)"

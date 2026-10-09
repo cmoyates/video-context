@@ -137,6 +137,22 @@ def _parse_video(data: dict[str, object]) -> _Video:
         rotation = _integer(matrices[0]["rotation"])
         if len(matrices) != 1 or rotation % 90:
             raise ValueError("Unsupported display: only quarter-turn rotations are supported")
+        values = [
+            int(value)
+            for row in _text(matrices[0]["displaymatrix"]).splitlines()
+            if ":" in row
+            for value in row.split(":", 1)[1].split()
+        ]
+        if len(values) != 9:
+            raise ValueError("Unsupported display matrix")
+        a, b, u, c, d, v, x, y, w = values
+        if (
+            (u, v, x, y, w) != (0, 0, 0, 0, 1073741824)
+            or sorted((abs(a), abs(b))) != [0, 65536]
+            or sorted((abs(c), abs(d))) != [0, 65536]
+            or a * c + b * d != 0
+        ):
+            raise ValueError("Unsupported display matrix: scaling, shear, or translation")
         if rotation % 180:
             width, height = height, width
     if any(

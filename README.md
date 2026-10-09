@@ -3,7 +3,7 @@
 Local preprocessing of narrated screen recordings for AI coding agents.
 
 Record a normal macOS screen recording with microphone narration, then give the
-recording's path to Codex. The intended tool will provide timestamped transcripts
+recording's path to Codex. The tool provides timestamped transcripts
 and visual evidence that the agent can inspect alongside a codebase.
 
 ## Status
@@ -11,10 +11,25 @@ and visual evidence that the agent can inspect alongside a codebase.
 The visual slices prepare local MOV/MP4 recordings, create a sparse overview,
 and retrieve timestamped frames, intervals, and crops in later CLI processes.
 Local transcription and literal transcript search are available with the optional
-Apple Silicon ASR dependencies. The Codex skill remains planned. No speech model
+Apple Silicon ASR dependencies. The Codex skill connects these steps to a coding chat. No speech model
 is needed or downloaded for silent recordings or explicit visual-only preparation.
 
 ## Prepare and inspect
+
+For use from any repository, install the CLI and Codex skill once:
+
+```bash
+bash scripts/install.sh
+video-context models fetch turbo
+```
+
+The installer uses the locked dependencies and adds the
+[Video Context skill](skills/video-context/SKILL.md) to your personal Codex skills.
+In a new Codex chat, give it a recording path and ask to use `$video-context`.
+The CLI is installed independently of this checkout; the skill is linked here,
+so retain the checkout. `bash scripts/install.sh --visual-only` omits MLX.
+Re-run the installer after source updates. If the executable is not on PATH,
+resolve it with `uv tool dir --bin`.
 
 Requires Python 3.12+, uv, and `ffmpeg`/`ffprobe` on PATH (verified with FFmpeg 8.1.2).
 
@@ -32,13 +47,15 @@ model once. Preparation itself only uses local model files and never uploads med
 
 ```bash
 uv sync --extra asr --locked
-uv run --extra asr video-context models fetch small
-uv run --extra asr video-context prepare /absolute/path/narrated.mov --model small --language en
+uv run --extra asr video-context models fetch turbo
+uv run --extra asr video-context prepare /absolute/path/narrated.mov --language en
 uv run video-context search RECORDING_ID "offline" --limit 10
 ```
 
-Omit `--language` for detection. `small` is provisional pending the comparison
-with `turbo`; both model revisions are pinned in the package. `--visual-only`
+Omit `--language` for detection. `turbo` is the default; `--model small` uses less
+memory and downloads fewer bytes. Both model revisions are pinned in the package.
+The [local comparison](docs/verification/issue-5.json) records the selection evidence
+and its human-review limitations. `--visual-only`
 skips recognition. `--audio-stream N` selects an absolute source stream index;
 otherwise the first audio stream is used. Audio is normalized to 16 kHz mono
 PCM with delayed starts and timestamp gaps preserved as silence. Normalization,

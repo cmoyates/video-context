@@ -72,7 +72,7 @@ class Transcriber(Protocol):
 
 class MLXWhisper:
     def __init__(
-        self, model: str = "small", *, language: str | None = None, word_timestamps: bool = True
+        self, model: str = "turbo", *, language: str | None = None, word_timestamps: bool = True
     ) -> None:
         if model not in MODELS:
             raise ValueError("Model must be small or turbo")

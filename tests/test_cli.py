@@ -194,4 +194,4 @@ def test_missing_local_model_returns_partial_visual_result_and_explicit_setup(
     assert result.returncode == 1
     recording = json.loads(result.stdout)
     assert recording["visual_status"] == "ready" and recording["audio_status"] == "failed"
-    assert "models fetch small" in result.stderr or "Install video-context[asr]" in result.stderr
+    assert "models fetch turbo" in result.stderr or "Install video-context[asr]" in result.stderr
