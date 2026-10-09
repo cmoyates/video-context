@@ -14,3 +14,11 @@ wheels/
 .DS_Store
 
 .pytest_cache/
+
+# Local credentials and recording artifacts
+.env
+.env.*
+!.env.example
+input/
+output/
+work/

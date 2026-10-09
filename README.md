@@ -1,6 +1,60 @@
-# Python Template
+# Video Context
 
-Opinionated starting point for new Python projects. Clone, rename, build.
+Local preprocessing of narrated screen recordings for AI coding agents.
+
+Record a normal macOS screen recording with microphone narration, then give the
+recording's path to Codex. The intended tool will provide timestamped transcripts
+and visual evidence that the agent can inspect alongside a codebase.
+
+## Status
+
+Project scaffold only. Media processing, transcription, frame retrieval, and the
+Codex skill are not implemented yet. No runtime dependencies or model weights
+have been installed.
+
+Based on [cmoyates/python-template](https://github.com/cmoyates/python-template),
+commit `d241bd750afee8beee62a6a8ed2e926b3dc88731`. Template history is retained.
+Repository: [cmoyates/video-context](https://github.com/cmoyates/video-context).
+
+## Agreed direction
+
+- Keep recording natural: use macOS Command-Shift-5, select the recording area,
+  enable the microphone, and narrate while using the app. No custom recorder or
+  manual timestamp annotations are required.
+- Process recordings locally: extract audio, transcribe speech, index timestamps,
+  and extract frames on the Mac. Selected frames and transcript text may become
+  context for the coding agent; local preprocessing is not local model inference.
+- Preserve original recordings and their timeline. Cache derived artifacts so
+  follow-up questions do not require transcription again.
+- Let the agent inspect any moment, including nearby frames and crops. Initial
+  keyframes must not be the only available visual evidence.
+- Preserve cursor movements and subtle UI changes when selecting frames. Ordinary
+  recordings do not supply a separate click-event track.
+- Distinguish spoken requests, visible observations, and uncertain interpretations.
+  App playback audio must not automatically become an instruction from the user.
+- Start with Python, FFmpeg/ffprobe, a replaceable local transcription backend,
+  and a CLI plus Codex skill. Evaluate MLX Whisper on a representative recording;
+  MCP and local OCR are optional later additions.
+- SpeechCatcher is the first use case; keep this tool independent of its repository.
+
+## Development
+
+The Python 3.12 baseline is retained from the template. Development dependencies
+are locked in `uv.lock`. Run commands from this directory:
+
+```bash
+uv sync --locked
+uv run main.py
+uv run ruff check .
+uv run ruff format --check .
+uv run ty check
+uv run pytest
+```
+
+The starter currently has no tests; pytest reports no tests collected (exit 5).
+Tests will live under `tests/`, with source modules under `src/`, as configured by
+the template. Local recordings and derived artifacts belong in the gitignored
+`input/`, `output/`, and `work/` directories.
 
 ## What's Included
 
@@ -31,30 +85,11 @@ Skills live in both `.agents/` and `.claude/` (Claude Code doesn't inherit from 
 - **[Matt Pocock's skills](https://github.com/mattpocock/skills)** (snapshot: 2026-05-02) — TDD, diagnose, grill-me, triage, and more. After cloning and renaming the repo, run the `setup-matt-pocock-skills` skill if you plan to use them.
 - **[btca-local](https://github.com/davis7dotsh/better-context/blob/main/skills/btca-local/SKILL.md)** — "Better Context App Local". Triggered with `use btca`, it lets the agent search any git repo locally by cloning (or updating) it under `~/.btca/agent/sandbox` and answering questions against the source with citations and code snippets.
 
-## Usage
-
-After cloning, rename the project (replaces `python-template` everywhere, runs `uv sync`, deletes itself):
-
-```bash
-./rename.sh my-new-project
-```
-
-```bash
-uv sync                # install deps
-uv run main.py         # run
-uv run ruff check      # lint
-uv run ruff format     # format
-uv run ty check        # typecheck
-uv run pytest          # test
-```
-
-Tests live under `tests/`; source on the import path lives under `src/`. Markers `unit`, `integration`, and `slow` are pre-registered in `pyproject.toml`.
-
 ## Configuration
 
 Lint/format rules live in `pyproject.toml` under `[tool.ruff]`. Defaults:
 
 - Line length: 100
-- Target: Python 3.11+
+- Target: Python 3.12+
 - Lint rules: pycodestyle, Pyflakes, isort, pyupgrade, bugbear, simplify
 - Quote style: double
